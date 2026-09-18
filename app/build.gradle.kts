@@ -7,23 +7,18 @@ plugins {
 android {
     namespace = "com.limradigitals.mobilebackup"
     compileSdk = 35
-
     defaultConfig {
         applicationId = "com.limradigitals.mobilebackup"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 }
 
 dependencies {
@@ -35,4 +30,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
+    implementation("com.google.api-client:google-api-client-android:2.7.2")
+    implementation("com.google.apis:google-api-services-drive:v3-rev20250120-2.0.0")
+    implementation("com.google.http-client:google-http-client-gson:1.45.3")
 }
