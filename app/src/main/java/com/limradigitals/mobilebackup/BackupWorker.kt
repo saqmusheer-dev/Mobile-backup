@@ -15,8 +15,9 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
     override suspend fun doWork(): Result {
         val account = GoogleSignIn.getLastSignedInAccount(applicationContext)
         if (account == null || !GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))) {
-            saveStatus("Connect Google Drive before starting backup.")
-            return Result.failure()
+            val message = "Connect Google Drive before starting backup."
+            saveStatus(message)
+            return Result.failure(workDataOf("message" to message))
         }
 
         val prefs = BackupPrefs(applicationContext)
@@ -36,36 +37,65 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         val items = allItems.filter { selectedKeys.contains(it.selectionKey) }
 
         if (items.isEmpty()) {
-            saveStatus("No files selected for backup.")
-            return Result.success()
+            val message = "No files selected for backup."
+            saveStatus(message)
+            return Result.success(workDataOf("message" to message))
         }
 
         val drive = DriveBackup(applicationContext)
         var uploaded = 0
         var failed = 0
 
+        setProgress(workDataOf(
+            "uploaded" to 0,
+            "total" to items.size,
+            "name" to ""
+        ))
+
         for (item in items) {
             if (isStopped) return Result.retry()
+
             try {
+                setProgress(workDataOf(
+                    "uploaded" to uploaded,
+                    "total" to items.size,
+                    "name" to item.name
+                ))
+
                 drive.upload(item)
                 uploaded++
+
+                setProgress(workDataOf(
+                    "uploaded" to uploaded,
+                    "total" to items.size,
+                    "name" to item.name
+                ))
+            } catch (e: Exception) {
+                failed++
+
                 setProgress(workDataOf(
                     "uploaded" to uploaded,
                     "total" to items.size,
                     "name" to item.name,
-                    "category" to item.category
+                    "failed" to failed,
+                    "error" to (e.message ?: e.javaClass.simpleName)
                 ))
-            } catch (e: Exception) {
-                failed++
+
                 if (e is IOException) {
-                    saveStatus("Paused after " + uploaded + " files. Will retry on Wi-Fi.")
+                    saveStatus("Paused after " + uploaded + " files. Will retry.")
                     return Result.retry()
                 }
             }
         }
 
-        saveStatus("Backup complete: " + uploaded + " uploaded, " + failed + " failed.")
-        return if (failed == 0) Result.success() else Result.retry()
+        val message = "Backup complete: " + uploaded + " uploaded, " + failed + " failed."
+        saveStatus(message)
+
+        return if (failed == 0) {
+            Result.success(workDataOf("message" to message))
+        } else {
+            Result.retry()
+        }
     }
 
     private fun saveStatus(message: String) {
