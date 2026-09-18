@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.graphics.Bitmap
+import android.util.Size
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
@@ -13,15 +15,22 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.Image
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
 import com.google.android.gms.common.api.ApiException
 
 class MainActivity : ComponentActivity() {
@@ -117,6 +126,7 @@ private fun BackupApp(
     var screen by remember { mutableStateOf("Backup") }
 
     val title = when (screen) {
+        "Gallery" -> "Photo Gallery"
         "Organize" -> "Organize files"
         "Accounts" -> "Google accounts"
         "Settings" -> "Backup settings"
@@ -133,6 +143,7 @@ private fun BackupApp(
             NavigationBar {
                 listOf(
                     "Backup" to "⌂",
+                    "Gallery" to "▦",
                     "Organize" to "▣",
                     "Accounts" to "●",
                     "Settings" to "⚙"
@@ -148,6 +159,7 @@ private fun BackupApp(
         }
     ) { pad ->
         when (screen) {
+            "Gallery" -> GalleryScreen(state, vm, { screen = "Organize" }, Modifier.padding(pad))
             "Organize" -> OrganizeScreen(state, vm, Modifier.padding(pad))
             "Accounts" -> AccountsScreen(state, vm, driveLauncher, Modifier.padding(pad))
             "Settings" -> SettingsScreen(state, vm, Modifier.padding(pad))
@@ -157,6 +169,132 @@ private fun BackupApp(
 
     if (state.backupRunning) {
         BackupProgressDialog(state, vm)
+    }
+}
+
+@Composable
+private fun GalleryScreen(
+    state: BackupUiState,
+    vm: BackupViewModel,
+    onOrganize: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val images = remember(state.scannedItems) {
+        state.scannedItems.filter {
+            it.mimeType.startsWith("image/") || it.category.endsWith("/Images")
+        }
+    }
+    val selectedImages = state.selectedKeys.count { key ->
+        images.any { it.selectionKey == key }
+    }
+
+    Column(
+        modifier = modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Card(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Photo Gallery", style = MaterialTheme.typography.titleLarge)
+                    Text("${images.size} images • $selectedImages selected")
+                }
+                Button(onClick = onOrganize, enabled = selectedImages > 0) {
+                    Text("Organize")
+                }
+            }
+        }
+
+        if (images.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No images found. Scan your selected categories first.")
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(bottom = 12.dp)
+            ) {
+                items(images, key = { it.selectionKey }) { item ->
+                    GalleryTile(
+                        item,
+                        state.selectedKeys.contains(item.selectionKey),
+                        state.backedUpKeys.contains(item.selectionKey)
+                    ) { vm.toggleFile(item) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GalleryTile(
+    item: MediaItem,
+    selected: Boolean,
+    backedUp: Boolean,
+    onClick: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = item.uri) {
+        value = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            try {
+                context.contentResolver.loadThumbnail(item.uri, Size(500, 500), null)
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap!!.asImageBitmap(),
+                    contentDescription = item.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                }
+            }
+
+            if (selected) {
+                Surface(
+                    modifier = Modifier.padding(6.dp).align(Alignment.TopEnd).size(28.dp),
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("✓", color = Color.White)
+                    }
+                }
+            }
+
+            if (backedUp) {
+                Surface(
+                    modifier = Modifier.padding(6.dp).align(Alignment.BottomStart),
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF2E9D50)
+                ) {
+                    Text(
+                        "✓ Backed up",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
