@@ -1,7 +1,14 @@
 package com.limradigitals.mobilebackup
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.ServiceInfo
+import android.os.Build
+import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -12,7 +19,14 @@ import java.io.IOException
 class BackupWorker(appContext: Context, params: WorkerParameters) :
     CoroutineWorker(appContext, params) {
 
+    companion object {
+        private const val CHANNEL_ID = "backup_progress"
+        private const val NOTIFICATION_ID = 4101
+    }
+
     override suspend fun doWork(): Result {
+        setForeground(createForegroundInfo("Preparing backup…", 0, 0))
+
         val account = GoogleSignIn.getLastSignedInAccount(applicationContext)
         if (account == null || !GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))) {
             val message = "Connect Google Drive before starting backup."
@@ -57,6 +71,7 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
             "name" to "",
             "phase" to "starting"
         ))
+        setForeground(createForegroundInfo("Starting backup…", 0, items.size))
 
         for (item in items) {
             if (isStopped) return Result.retry()
@@ -70,6 +85,14 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                 "name" to item.name,
                 "phase" to "uploading"
             ))
+            setForeground(
+                createForegroundInfo(
+                    "Uploading " + (completed + 1).coerceAtMost(items.size) +
+                        " of " + items.size + " • " + item.name,
+                    completed,
+                    items.size
+                )
+            )
 
             try {
                 when (drive.upload(item)) {
@@ -87,6 +110,13 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                     "name" to item.name,
                     "phase" to if (completed == items.size) "complete" else "uploaded"
                 ))
+                setForeground(
+                    createForegroundInfo(
+                        "Processed " + completed + " of " + items.size,
+                        completed,
+                        items.size
+                    )
+                )
             } catch (e: Exception) {
                 failed++
                 completed++
@@ -125,6 +155,40 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         } else {
             Result.retry()
         }
+    }
+
+    private fun createForegroundInfo(text: String, completed: Int, total: Int): ForegroundInfo {
+        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE)
+            as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "Backup progress",
+                    NotificationManager.IMPORTANCE_LOW
+                )
+            )
+        }
+
+        val cancelIntent = WorkManager.getInstance(applicationContext)
+            .createCancelPendingIntent(id)
+
+        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setContentTitle("Mobile Backup")
+            .setContentText(text)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setProgress(total.coerceAtLeast(0), completed.coerceAtLeast(0), total <= 0)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelIntent)
+            .build()
+
+        return ForegroundInfo(
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
     }
 
     private fun saveStatus(message: String) {
