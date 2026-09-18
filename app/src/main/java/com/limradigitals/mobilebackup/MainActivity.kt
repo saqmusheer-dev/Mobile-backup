@@ -122,12 +122,16 @@ private fun BackupScreen(
                 FileSelectionCard(state, vm)
             }
 
+            if (state.backupTotal > 0) {
+                BackupProgressCard(state)
+            }
+
             Button(
                 onClick = vm::startBackup,
-                enabled = state.filesFound > 0 && state.driveConnected,
+                enabled = state.filesFound > 0 && state.driveConnected && !state.backupRunning,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Start Backup")
+                Text(if (state.backupRunning) "Backup Running..." else "Start Backup")
             }
 
             OutlinedButton(
@@ -206,6 +210,45 @@ private fun BackupScreen(
                 style = MaterialTheme.typography.bodySmall
             )
             Spacer(Modifier.height(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun BackupProgressCard(state: BackupUiState) {
+    val total = state.backupTotal.coerceAtLeast(1)
+    val progress = (state.backupCompleted.toFloat() / total).coerceIn(0f, 1f)
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                if (state.backupRunning) "Backup in progress" else "Last backup",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Text(state.backupCompleted.toString() + " of " + state.backupTotal + " files processed")
+            Text(
+                state.backupUploaded.toString() + " uploaded • " +
+                    state.backupAlready.toString() + " already backed up • " +
+                    state.backupFailed.toString() + " failed",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            if (state.backupRunning && state.backupCurrentName.isNotBlank()) {
+                Text(
+                    "Uploading: " + state.backupCurrentName,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
