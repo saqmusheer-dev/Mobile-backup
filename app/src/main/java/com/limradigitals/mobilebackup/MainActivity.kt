@@ -9,18 +9,21 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.google.android.gms.common.api.ApiException
 
 class MainActivity : ComponentActivity() {
     private lateinit var vm: BackupViewModel
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { }
+    ) { vm.refreshStorageAccess() }
 
     private val driveLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -28,10 +31,18 @@ class MainActivity : ComponentActivity() {
         try {
             val task = com.google.android.gms.auth.api.signin.GoogleSignIn
                 .getSignedInAccountFromIntent(result.data)
-            task.getResult(com.google.android.gms.common.api.ApiException::class.java)
+            task.getResult(ApiException::class.java)
             vm.driveConnected()
+        } catch (e: ApiException) {
+            val message = when (e.statusCode) {
+                10 -> "Google setup error (code 10). Add the Android OAuth client with the correct package name and SHA-1 in Google Cloud."
+                12501 -> "Google sign-in was cancelled."
+                7 -> "Google sign-in network error. Check your internet connection."
+                else -> "Google sign-in failed (code " + e.statusCode + ")."
+            }
+            vm.setMessage(message)
         } catch (e: Exception) {
-            vm.setMessage("Google Drive sign-in failed. Check the Google Cloud setup.")
+            vm.setMessage("Google Drive sign-in failed: " + (e.message ?: "unknown error"))
         }
     }
 
@@ -42,6 +53,11 @@ class MainActivity : ComponentActivity() {
         setContent { MaterialTheme { BackupScreen(vm, driveLauncher) } }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::vm.isInitialized) vm.refreshStorageAccess()
+    }
+
     private fun requestStoragePermissions() {
         val permissions = if (Build.VERSION.SDK_INT >= 33) {
             arrayOf(
@@ -49,7 +65,9 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.READ_MEDIA_VIDEO,
                 Manifest.permission.READ_MEDIA_AUDIO
             )
-        } else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
 
         val missing = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
@@ -60,18 +78,29 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BackupScreen(vm: BackupViewModel, driveLauncher: ActivityResultLauncher<android.content.Intent>) {
+private fun BackupScreen(
+    vm: BackupViewModel,
+    driveLauncher: ActivityResultLauncher<android.content.Intent>
+) {
     val state by vm.state.collectAsState()
 
     Scaffold(topBar = { TopAppBar(title = { Text("Mobile Backup") }) }) { pad ->
         Column(
-            Modifier.padding(pad).padding(18.dp).fillMaxSize(),
+            Modifier
+                .padding(pad)
+                .padding(horizontal = 18.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            Spacer(Modifier.height(4.dp))
             Text("Phone → Google Drive", style = MaterialTheme.typography.headlineSmall)
 
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Text("Backup status", style = MaterialTheme.typography.titleMedium)
                     Text(state.message)
                     Text("Files found: " + state.filesFound)
@@ -80,7 +109,7 @@ private fun BackupScreen(vm: BackupViewModel, driveLauncher: ActivityResultLaunc
             }
 
             Button(onClick = vm::scan, modifier = Modifier.fillMaxWidth()) {
-                Text("Scan Phone")
+                Text("Scan Selected Categories")
             }
 
             Button(
@@ -107,16 +136,60 @@ private fun BackupScreen(vm: BackupViewModel, driveLauncher: ActivityResultLaunc
             }
 
             HorizontalDivider()
-            Text("Categories", style = MaterialTheme.typography.titleMedium)
-            SettingRow("Images", state.images) { vm.setCategory("images", it) }
-            SettingRow("Videos", state.videos) { vm.setCategory("videos", it) }
-            SettingRow("Audio / MP3", state.audio) { vm.setCategory("audio", it) }
+            Text("Phone", style = MaterialTheme.typography.titleMedium)
+            SettingRow("Images", state.phoneImages) { vm.setCategory("phoneImages", it) }
+            SettingRow("Videos", state.phoneVideos) { vm.setCategory("phoneVideos", it) }
+            SettingRow("Audio", state.phoneAudio) { vm.setCategory("phoneAudio", it) }
+            SettingRow("Documents", state.phoneDocuments) { vm.setCategory("phoneDocuments", it) }
             SettingRow("Downloads", state.downloads) { vm.setCategory("downloads", it) }
 
+            HorizontalDivider()
+            Text("WhatsApp", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Deletion remains disabled in the backup worker until Android's required media-delete confirmation is handled.",
+                "WhatsApp media is backed up separately for a clean Drive folder structure.",
                 style = MaterialTheme.typography.bodySmall
             )
+            SettingRow("Images", state.whatsappImages) { vm.setCategory("whatsappImages", it) }
+            SettingRow("Videos", state.whatsappVideos) { vm.setCategory("whatsappVideos", it) }
+            SettingRow("Audio / Voice Notes", state.whatsappAudio) {
+                vm.setCategory("whatsappAudio", it)
+            }
+            SettingRow("Documents", state.whatsappDocuments) {
+                vm.setCategory("whatsappDocuments", it)
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                (state.phoneDocuments || state.whatsappDocuments)
+            ) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("Documents access", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (state.allFilesAccess)
+                                "Full storage access is enabled."
+                            else
+                                "Android requires full storage access to scan documents and WhatsApp Documents."
+                        )
+                        if (!state.allFilesAccess) {
+                            OutlinedButton(
+                                onClick = vm::openAllFilesAccess,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Allow Storage Access")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text(
+                "Deletion remains disabled until Android's required media-delete confirmation is implemented.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(Modifier.height(20.dp))
         }
     }
 }
