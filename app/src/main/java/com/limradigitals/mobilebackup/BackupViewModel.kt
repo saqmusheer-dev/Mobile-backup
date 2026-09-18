@@ -93,7 +93,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     fun setAutoBackup(value: Boolean) {
         prefs.autoBackup = value
         _state.value = _state.value.copy(autoBackup = value)
-        if (value) enqueueBackup()
+        if (value) scheduleAutomaticBackup()
         else workManager.cancelUniqueWork("mobile-backup")
     }
 
@@ -136,8 +136,18 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 androidx.work.BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS
             )
             .build()
-        workManager.enqueueUniqueWork(
-            "mobile-backup", ExistingWorkPolicy.KEEP, request
+        workManager.enqueueUniqueWork("mobile-backup-now", ExistingWorkPolicy.KEEP, request)
+    }
+
+    private fun scheduleAutomaticBackup() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(prefs.networkType())
+            .build()
+        val request = androidx.work.PeriodicWorkRequestBuilder<BackupWorker>(
+            15, TimeUnit.MINUTES
+        ).setConstraints(constraints).build()
+        workManager.enqueueUniquePeriodicWork(
+            "mobile-backup", androidx.work.ExistingPeriodicWorkPolicy.UPDATE, request
         )
     }
 }
