@@ -14,6 +14,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -42,18 +43,22 @@ data class BackupUiState(
     val selectedKeys: Set<String> = emptySet(),
     val selectedBytes: Long = 0L,
     val totalBytes: Long = 0L,
+    val backedUpKeys: Set<String> = emptySet(),
     val backupRunning: Boolean = false,
     val backupCompleted: Int = 0,
     val backupTotal: Int = 0,
     val backupUploaded: Int = 0,
     val backupAlready: Int = 0,
     val backupFailed: Int = 0,
-    val backupCurrentName: String = ""
+    val backupCurrentName: String = "",
+    val lastZipUri: Uri? = null,
+    val localFolders: List<String> = emptyList()
 )
 
 class BackupViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = BackupPrefs(app)
     private val selectionStore = SelectionStore(app)
+    private val folderStore = LocalFolderStore(app)
     private val workManager = WorkManager.getInstance(app)
 
     private val _state = MutableStateFlow(
@@ -72,7 +77,8 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             whatsappAudio = prefs.whatsappAudio,
             whatsappDocuments = prefs.whatsappDocuments,
             downloads = prefs.downloads,
-            allFilesAccess = hasAllFilesAccess()
+            allFilesAccess = hasAllFilesAccess(),
+            localFolders = folderStore.list()
         )
     )
     val state = _state.asStateFlow()
@@ -82,9 +88,9 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         when (work.state) {
             WorkInfo.State.ENQUEUED -> {
                 _state.value = _state.value.copy(
-                    backupRunning = false,
+                    backupRunning = true,
                     message = if (prefs.wifiOnly)
-                        "Backup queued. Waiting for Wi-Fi..."
+                        "Backup waiting for Wi-Fi..."
                     else
                         "Backup queued. Starting..."
                 )
@@ -99,9 +105,9 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 val phase = work.progress.getString("phase").orEmpty()
 
                 val message = when (phase) {
-                    "uploading" -> "Uploading " + (completed + 1).coerceAtMost(total) +
-                        " of " + total + " • " + name
-                    "uploaded" -> "Uploaded " + completed + " of " + total
+                    "uploading" -> "Uploading " +
+                        (completed + 1).coerceAtMost(total) + " of " + total + " • " + name
+                    "uploaded" -> "Processed " + completed + " of " + total
                     else -> "Starting backup..."
                 }
 
@@ -122,12 +128,19 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 val uploaded = work.outputData.getInt("uploaded", _state.value.backupUploaded)
                 val already = work.outputData.getInt("already", _state.value.backupAlready)
                 val failed = work.outputData.getInt("failed", _state.value.backupFailed)
+                val successfulKeys = if (failed == 0) {
+                    _state.value.selectedKeys
+                } else {
+                    emptySet()
+                }
+
                 _state.value = _state.value.copy(
                     backupRunning = false,
                     backupCompleted = completed,
                     backupUploaded = uploaded,
                     backupAlready = already,
                     backupFailed = failed,
+                    backedUpKeys = _state.value.backedUpKeys + successfulKeys,
                     pending = 0,
                     backupCurrentName = "",
                     message = work.outputData.getString("message") ?: "Backup complete."
@@ -148,7 +161,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             }
             WorkInfo.State.BLOCKED -> {
                 _state.value = _state.value.copy(
-                    backupRunning = false,
+                    backupRunning = true,
                     message = "Backup is waiting to start..."
                 )
             }
@@ -194,7 +207,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
 
     fun scan() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _state.value = _state.value.copy(message = "Scanning selected categories...")
             val needsAllFiles = prefs.phoneDocuments || prefs.whatsappDocuments
             val warning = if (needsAllFiles && !hasAllFilesAccess() && Build.VERSION.SDK_INT >= 30) {
@@ -226,6 +239,21 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 selectedBytes = totalBytes,
                 totalBytes = totalBytes
             )
+
+            if (DriveBackup(getApplication()).isConnected()) {
+                _state.value = _state.value.copy(message = "Checking Google Drive backup status...")
+                try {
+                    val backedUp = DriveBackup(getApplication()).findBackedUpKeys()
+                    _state.value = _state.value.copy(
+                        backedUpKeys = backedUp,
+                        message = "Scan complete. Green checks are already backed up."
+                    )
+                } catch (_: Exception) {
+                    _state.value = _state.value.copy(
+                        message = "Scan complete. Drive status check was skipped."
+                    )
+                }
+            }
         }
     }
 
@@ -261,6 +289,31 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             driveAccountEmail = accountEmail,
             message = "Google Drive connected."
         )
+    }
+
+    fun signOutDrive() {
+        val options = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+            com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
+        )
+            .requestEmail()
+            .requestScopes(
+                com.google.android.gms.common.api.Scope(
+                    com.google.api.services.drive.DriveScopes.DRIVE_FILE
+                )
+            )
+            .build()
+
+        com.google.android.gms.auth.api.signin.GoogleSignIn
+            .getClient(getApplication<Application>(), options)
+            .signOut()
+            .addOnCompleteListener {
+                _state.value = _state.value.copy(
+                    driveConnected = false,
+                    driveAccountEmail = null,
+                    backedUpKeys = emptySet(),
+                    message = "Signed out. Connect another Google account."
+                )
+            }
     }
 
     fun toggleFile(item: MediaItem) {
@@ -358,12 +411,103 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             backupCurrentName = "",
             pending = total,
             message = if (prefs.wifiOnly)
-                "Backup queued. Waiting for Wi-Fi..."
+                "Backup waiting for Wi-Fi..."
             else
                 "Backup queued. Starting..."
         )
 
         enqueueBackup()
+    }
+
+    fun cancelBackup() {
+        workManager.cancelUniqueWork("mobile-backup-now")
+        _state.value = _state.value.copy(
+            backupRunning = false,
+            message = "Backup cancelled."
+        )
+    }
+
+    fun createZip() {
+        val items = _state.value.scannedItems.filter {
+            _state.value.selectedKeys.contains(it.selectionKey)
+        }
+        if (items.isEmpty()) {
+            setMessage("Select files before creating a ZIP.")
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _state.value = _state.value.copy(message = "Creating ZIP backup...")
+                val uri = ZipManager.createZip(getApplication(), items)
+                _state.value = _state.value.copy(
+                    lastZipUri = uri,
+                    message = "ZIP created in Downloads/Mobile Backup."
+                )
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    message = "ZIP failed: " + (e.message ?: e.javaClass.simpleName)
+                )
+            }
+        }
+    }
+
+    fun clearZipUri() {
+        _state.value = _state.value.copy(lastZipUri = null)
+    }
+
+    fun uploadZipToDrive() {
+        val uri = _state.value.lastZipUri ?: run {
+            setMessage("Create a ZIP first.")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _state.value = _state.value.copy(message = "Uploading ZIP to Google Drive...")
+                DriveBackup(getApplication()).uploadUri(
+                    uri,
+                    "MobileBackup_" + System.currentTimeMillis() + ".zip",
+                    "application/zip"
+                )
+                _state.value = _state.value.copy(message = "ZIP uploaded to Drive/Exports.")
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    message = "ZIP upload failed: " + (e.message ?: e.javaClass.simpleName)
+                )
+            }
+        }
+    }
+
+    fun addLocalFolder(name: String) {
+        if (folderStore.add(name)) {
+            _state.value = _state.value.copy(localFolders = folderStore.list())
+        } else {
+            _state.value = _state.value.copy(message = "Enter a new folder name.")
+        }
+    }
+
+    fun copySelectedToFolder(folder: String) {
+        val items = _state.value.scannedItems.filter {
+            _state.value.selectedKeys.contains(it.selectionKey)
+        }
+        if (items.isEmpty()) {
+            setMessage("Select files before organizing.")
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _state.value = _state.value.copy(message = "Organizing files into $folder...")
+                val count = LocalOrganizer.copyToFolder(getApplication(), items, folder)
+                _state.value = _state.value.copy(
+                    message = "$count files copied to Download/Mobile Backup/$folder."
+                )
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    message = "Organize failed: " + (e.message ?: e.javaClass.simpleName)
+                )
+            }
+        }
     }
 
     private fun enqueueBackup() {
