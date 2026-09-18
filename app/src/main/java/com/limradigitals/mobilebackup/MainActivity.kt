@@ -211,7 +211,6 @@ private fun BackupScreen(
 }
 
 @Composable
-@Composable
 private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
     var filter by remember { mutableStateOf("All") }
 
