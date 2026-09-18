@@ -133,22 +133,30 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun connectDrive(onIntent: (Intent) -> Unit) {
-        val options = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
-            com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
-        )
-            .requestEmail()
-            .requestScopes(
-                com.google.android.gms.common.api.Scope(
-                    com.google.api.services.drive.DriveScopes.DRIVE_FILE
-                )
+        try {
+            _state.value = _state.value.copy(message = "Opening Google sign-in...")
+            
+            val options = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
             )
-            .build()
+                .requestEmail()
+                .requestScopes(
+                    com.google.android.gms.common.api.Scope(
+                        com.google.api.services.drive.DriveScopes.DRIVE_FILE
+                    )
+                )
+                .build()
 
-        onIntent(
-            com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(
-                getApplication(), options
-            ).signInIntent
-        )
+            val signInIntent = com.google.android.gms.auth.api.signin.GoogleSignIn
+                .getClient(getApplication<Application>(), options)
+                .signInIntent
+
+            onIntent(signInIntent)
+        } catch (e: Exception) {
+            _state.value = _state.value.copy(
+                message = "Could not open Google sign-in: " + (e.message ?: e.javaClass.simpleName)
+            )
+        }
     }
 
     fun driveConnected(email: String? = null) {
