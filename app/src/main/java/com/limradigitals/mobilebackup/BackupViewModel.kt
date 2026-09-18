@@ -7,10 +7,12 @@ import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.Observer
 import androidx.lifecycle.viewModelScope
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,6 +70,57 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     )
     val state = _state.asStateFlow()
 
+    private val workObserver = Observer<List<WorkInfo>> { infos ->
+        val work = infos.firstOrNull() ?: return@Observer
+        when (work.state) {
+            WorkInfo.State.ENQUEUED -> {
+                _state.value = _state.value.copy(
+                    message = if (prefs.wifiOnly)
+                        "Backup queued. Waiting for Wi-Fi..."
+                    else
+                        "Backup queued. Starting..."
+                )
+            }
+            WorkInfo.State.RUNNING -> {
+                val uploaded = work.progress.getInt("uploaded", 0)
+                val total = work.progress.getInt("total", _state.value.selectedKeys.size)
+                val name = work.progress.getString("name").orEmpty()
+                val detail = if (name.isBlank()) "" else " • " + name
+                _state.value = _state.value.copy(
+                    message = "Backing up " + uploaded + " of " + total + detail
+                )
+            }
+            WorkInfo.State.SUCCEEDED -> {
+                _state.value = _state.value.copy(
+                    message = work.outputData.getString("message") ?: "Backup complete."
+                )
+            }
+            WorkInfo.State.FAILED -> {
+                _state.value = _state.value.copy(
+                    message = work.outputData.getString("message")
+                        ?: "Backup failed. Please try again."
+                )
+            }
+            WorkInfo.State.CANCELLED -> {
+                _state.value = _state.value.copy(message = "Backup cancelled.")
+            }
+            WorkInfo.State.BLOCKED -> {
+                _state.value = _state.value.copy(message = "Backup is waiting to start...")
+            }
+        }
+    }
+
+    init {
+        workManager.getWorkInfosForUniqueWorkLiveData("mobile-backup-now")
+            .observeForever(workObserver)
+    }
+
+    override fun onCleared() {
+        workManager.getWorkInfosForUniqueWorkLiveData("mobile-backup-now")
+            .removeObserver(workObserver)
+        super.onCleared()
+    }
+
     fun setMessage(message: String) {
         _state.value = _state.value.copy(message = message)
     }
@@ -98,7 +151,6 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     fun scan() {
         viewModelScope.launch {
             _state.value = _state.value.copy(message = "Scanning selected categories...")
-
             val needsAllFiles = prefs.phoneDocuments || prefs.whatsappDocuments
             val warning = if (needsAllFiles && !hasAllFilesAccess() && Build.VERSION.SDK_INT >= 30) {
                 " Documents need full storage access."
@@ -135,7 +187,6 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     fun connectDrive(onIntent: (Intent) -> Unit) {
         try {
             _state.value = _state.value.copy(message = "Opening Google sign-in...")
-            
             val options = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
                 com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
             )
@@ -150,7 +201,6 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             val signInIntent = com.google.android.gms.auth.api.signin.GoogleSignIn
                 .getClient(getApplication<Application>(), options)
                 .signInIntent
-
             onIntent(signInIntent)
         } catch (e: Exception) {
             _state.value = _state.value.copy(
@@ -254,7 +304,10 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
         enqueueBackup()
         _state.value = _state.value.copy(
-            message = if (prefs.wifiOnly) "Backup queued. Waiting for Wi-Fi..." else "Backup queued."
+            message = if (prefs.wifiOnly)
+                "Backup queued. Waiting for Wi-Fi..."
+            else
+                "Backup queued. Starting..."
         )
     }
 
@@ -272,7 +325,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
         workManager.enqueueUniqueWork(
             "mobile-backup-now",
-            ExistingWorkPolicy.KEEP,
+            ExistingWorkPolicy.REPLACE,
             request
         )
     }
