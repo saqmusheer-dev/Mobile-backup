@@ -20,7 +20,7 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         }
 
         val prefs = BackupPrefs(applicationContext)
-        val items = MediaScanner(applicationContext).scan(
+        val allItems = MediaScanner(applicationContext).scan(
             phoneImages = prefs.phoneImages,
             phoneVideos = prefs.phoneVideos,
             phoneAudio = prefs.phoneAudio,
@@ -32,8 +32,11 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
             downloads = prefs.downloads
         )
 
+        val selectedKeys = SelectionStore(applicationContext).loadSelected()
+        val items = allItems.filter { selectedKeys.contains(it.selectionKey) }
+
         if (items.isEmpty()) {
-            saveStatus("No files found for the selected categories.")
+            saveStatus("No files selected for backup.")
             return Result.success()
         }
 
