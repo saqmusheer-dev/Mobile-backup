@@ -1,6 +1,7 @@
 package com.limradigitals.mobilebackup
 
 import android.content.Context
+import android.net.Uri
 import android.util.Base64
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
@@ -23,6 +24,7 @@ enum class UploadResult {
 class DriveBackup(private val context: Context) {
     companion object {
         private const val ROOT = "Mobile Backup"
+        private const val EXPORTS = "Exports"
         private const val FOLDER = "application/vnd.google-apps.folder"
         private const val KEY = "mobileBackupKey"
     }
@@ -89,6 +91,32 @@ class DriveBackup(private val context: Context) {
         return Base64.encodeToString(hash, Base64.NO_WRAP or Base64.URL_SAFE)
     }
 
+    fun backupKey(item: MediaItem): String = sourceKey(item)
+
+    fun findBackedUpKeys(): Set<String> {
+        if (!isConnected()) return emptySet()
+        val d = drive()
+        val keys = mutableSetOf<String>()
+        var token: String? = null
+
+        do {
+            val page = d.files().list()
+                .setQ("appProperties has { key='" + KEY + "' } and trashed = false")
+                .setSpaces("drive")
+                .setPageSize(1000)
+                .setFields("nextPageToken,files(appProperties)")
+                .setPageToken(token)
+                .execute()
+
+            page.files.orEmpty().forEach { file ->
+                file.appProperties?.get(KEY)?.let { keys.add(it) }
+            }
+            token = page.nextPageToken
+        } while (!token.isNullOrBlank())
+
+        return keys
+    }
+
     private fun exists(d: Drive, key: String): Boolean {
         val q = "appProperties has { key='" + KEY + "' and value='" + key + "' } and trashed = false"
         return !d.files().list()
@@ -132,5 +160,26 @@ class DriveBackup(private val context: Context) {
         }
 
         return UploadResult.UPLOADED
+    }
+
+    fun uploadUri(uri: Uri, name: String, mimeType: String): String {
+        val d = drive()
+        val root = folder(d, ROOT, "root")
+        val parent = folder(d, EXPORTS, root)
+        val stream = context.contentResolver.openInputStream(uri)
+            ?: throw IOException("Cannot read export")
+
+        stream.use {
+            val metadata = File().apply {
+                this.name = name
+                parents = listOf(parent)
+            }
+            val media = InputStreamContent(mimeType, it)
+            val create = d.files().create(metadata, media).setFields("id,name,size")
+            create.mediaHttpUploader.isDirectUploadEnabled = false
+            create.mediaHttpUploader.chunkSize = 4 * 1024 * 1024
+            return create.execute().id
+                ?: throw IOException("Drive did not return an export file ID")
+        }
     }
 }
