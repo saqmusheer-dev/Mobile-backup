@@ -10,7 +10,7 @@ class LocalFolderStore(context: Context) {
         prefs.getStringSet(key, emptySet()).orEmpty().toList().sorted()
 
     fun add(name: String): Boolean {
-        val clean = name.trim().replace(Regex("[/\\:*?\"<>|]"), "_")
+        val clean = name.trim().replace(Regex("""[/\\:*?"<>|]"""), "_")
         if (clean.isBlank()) return false
         val folders = prefs.getStringSet(key, emptySet()).orEmpty().toMutableSet()
         val added = folders.add(clean)
