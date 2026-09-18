@@ -44,55 +44,84 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
 
         val drive = DriveBackup(applicationContext)
         var uploaded = 0
+        var alreadyBackedUp = 0
         var failed = 0
+        var completed = 0
 
         setProgress(workDataOf(
+            "completed" to 0,
             "uploaded" to 0,
+            "already" to 0,
+            "failed" to 0,
             "total" to items.size,
-            "name" to ""
+            "name" to "",
+            "phase" to "starting"
         ))
 
         for (item in items) {
             if (isStopped) return Result.retry()
 
+            setProgress(workDataOf(
+                "completed" to completed,
+                "uploaded" to uploaded,
+                "already" to alreadyBackedUp,
+                "failed" to failed,
+                "total" to items.size,
+                "name" to item.name,
+                "phase" to "uploading"
+            ))
+
             try {
-                setProgress(workDataOf(
-                    "uploaded" to uploaded,
-                    "total" to items.size,
-                    "name" to item.name
-                ))
-
-                drive.upload(item)
-                uploaded++
+                when (drive.upload(item)) {
+                    UploadResult.UPLOADED -> uploaded++
+                    UploadResult.ALREADY_BACKED_UP -> alreadyBackedUp++
+                }
+                completed++
 
                 setProgress(workDataOf(
+                    "completed" to completed,
                     "uploaded" to uploaded,
+                    "already" to alreadyBackedUp,
+                    "failed" to failed,
                     "total" to items.size,
-                    "name" to item.name
+                    "name" to item.name,
+                    "phase" to if (completed == items.size) "complete" else "uploaded"
                 ))
             } catch (e: Exception) {
                 failed++
+                completed++
 
                 setProgress(workDataOf(
+                    "completed" to completed,
                     "uploaded" to uploaded,
+                    "already" to alreadyBackedUp,
+                    "failed" to failed,
                     "total" to items.size,
                     "name" to item.name,
-                    "failed" to failed,
+                    "phase" to "failed",
                     "error" to (e.message ?: e.javaClass.simpleName)
                 ))
 
                 if (e is IOException) {
-                    saveStatus("Paused after " + uploaded + " files. Will retry.")
+                    saveStatus("Paused after " + completed + " of " + items.size + " files. Will retry.")
                     return Result.retry()
                 }
             }
         }
 
-        val message = "Backup complete: " + uploaded + " uploaded, " + failed + " failed."
+        val message = "Backup complete: " + uploaded + " uploaded, " +
+            alreadyBackedUp + " already backed up, " + failed + " failed."
         saveStatus(message)
 
         return if (failed == 0) {
-            Result.success(workDataOf("message" to message))
+            Result.success(workDataOf(
+                "message" to message,
+                "completed" to completed,
+                "uploaded" to uploaded,
+                "already" to alreadyBackedUp,
+                "failed" to failed,
+                "total" to items.size
+            ))
         } else {
             Result.retry()
         }
