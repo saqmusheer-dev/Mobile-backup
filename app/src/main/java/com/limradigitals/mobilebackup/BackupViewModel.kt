@@ -98,17 +98,6 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     fun scan() {
         viewModelScope.launch {
             _state.value = _state.value.copy(message = "Scanning selected categories...")
-            val count = MediaScanner(getApplication()).scan(
-                phoneImages = prefs.phoneImages,
-                phoneVideos = prefs.phoneVideos,
-                phoneAudio = prefs.phoneAudio,
-                phoneDocuments = prefs.phoneDocuments,
-                whatsappImages = prefs.whatsappImages,
-                whatsappVideos = prefs.whatsappVideos,
-                whatsappAudio = prefs.whatsappAudio,
-                whatsappDocuments = prefs.whatsappDocuments,
-                downloads = prefs.downloads
-            ).size
 
             val needsAllFiles = prefs.phoneDocuments || prefs.whatsappDocuments
             val warning = if (needsAllFiles && !hasAllFilesAccess() && Build.VERSION.SDK_INT >= 30) {
@@ -127,17 +116,18 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 downloads = prefs.downloads
             )
             val selected = items.map { it.selectionKey }.toSet()
+            val totalBytes = items.sumOf { it.size }
             selectionStore.saveSelected(selected)
 
             _state.value = _state.value.copy(
                 message = "Scan complete." + warning,
-                filesFound = count,
+                filesFound = items.size,
                 pending = selected.size,
                 allFilesAccess = hasAllFilesAccess(),
                 scannedItems = items,
                 selectedKeys = selected,
-                selectedBytes = items.sumOf { it.size },
-                totalBytes = items.sumOf { it.size }
+                selectedBytes = totalBytes,
+                totalBytes = totalBytes
             )
         }
     }
