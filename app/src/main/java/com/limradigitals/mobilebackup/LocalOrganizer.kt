@@ -13,7 +13,7 @@ object LocalOrganizer {
         }
 
         val cleanFolder = folderName.trim()
-            .replace(Regex("[/\\:*?\"<>|]"), "_")
+            .replace(Regex("""[/\\:*?"<>|]"""), "_")
             .trim()
         if (cleanFolder.isBlank()) throw IOException("Choose a folder name.")
 
