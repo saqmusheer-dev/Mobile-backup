@@ -12,7 +12,10 @@ data class MediaItem(
     val size: Long,
     val modifiedSeconds: Long,
     val category: String
-)
+) {
+    val selectionKey: String
+        get() = uri.toString() + "|" + size + "|" + modifiedSeconds
+}
 
 class MediaScanner(private val context: Context) {
     companion object {
