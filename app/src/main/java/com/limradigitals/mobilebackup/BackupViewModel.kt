@@ -22,6 +22,7 @@ data class BackupUiState(
     val filesFound: Int = 0,
     val pending: Int = 0,
     val driveConnected: Boolean = false,
+    val driveAccountEmail: String? = null,
     val wifiOnly: Boolean = true,
     val autoBackup: Boolean = false,
     val deleteAfterVerified: Boolean = false,
@@ -34,16 +35,22 @@ data class BackupUiState(
     val whatsappAudio: Boolean = true,
     val whatsappDocuments: Boolean = true,
     val downloads: Boolean = true,
-    val allFilesAccess: Boolean = false
+    val allFilesAccess: Boolean = false,
+    val scannedItems: List<MediaItem> = emptyList(),
+    val selectedKeys: Set<String> = emptySet(),
+    val selectedBytes: Long = 0L,
+    val totalBytes: Long = 0L
 )
 
 class BackupViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = BackupPrefs(app)
+    private val selectionStore = SelectionStore(app)
     private val workManager = WorkManager.getInstance(app)
 
     private val _state = MutableStateFlow(
         BackupUiState(
             driveConnected = DriveBackup(app).isConnected(),
+            driveAccountEmail = DriveBackup(app).account()?.email,
             wifiOnly = prefs.wifiOnly,
             autoBackup = prefs.autoBackup,
             deleteAfterVerified = prefs.deleteAfterVerified,
@@ -66,7 +73,11 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshStorageAccess() {
-        _state.value = _state.value.copy(allFilesAccess = hasAllFilesAccess())
+        _state.value = _state.value.copy(
+            allFilesAccess = hasAllFilesAccess(),
+            driveConnected = DriveBackup(getApplication()).isConnected(),
+            driveAccountEmail = DriveBackup(getApplication()).account()?.email
+        )
     }
 
     fun openAllFilesAccess() {
@@ -104,11 +115,29 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 " Documents need full storage access."
             } else ""
 
+            val items = MediaScanner(getApplication()).scan(
+                phoneImages = prefs.phoneImages,
+                phoneVideos = prefs.phoneVideos,
+                phoneAudio = prefs.phoneAudio,
+                phoneDocuments = prefs.phoneDocuments,
+                whatsappImages = prefs.whatsappImages,
+                whatsappVideos = prefs.whatsappVideos,
+                whatsappAudio = prefs.whatsappAudio,
+                whatsappDocuments = prefs.whatsappDocuments,
+                downloads = prefs.downloads
+            )
+            val selected = items.map { it.selectionKey }.toSet()
+            selectionStore.saveSelected(selected)
+
             _state.value = _state.value.copy(
                 message = "Scan complete." + warning,
                 filesFound = count,
-                pending = count,
-                allFilesAccess = hasAllFilesAccess()
+                pending = selected.size,
+                allFilesAccess = hasAllFilesAccess(),
+                scannedItems = items,
+                selectedKeys = selected,
+                selectedBytes = items.sumOf { it.size },
+                totalBytes = items.sumOf { it.size }
             )
         }
     }
@@ -132,10 +161,36 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun driveConnected() {
+    fun driveConnected(email: String? = null) {
+        val accountEmail = email ?: DriveBackup(getApplication()).account()?.email
         _state.value = _state.value.copy(
             driveConnected = true,
+            driveAccountEmail = accountEmail,
             message = "Google Drive connected."
+        )
+    }
+
+    fun toggleFile(item: MediaItem) {
+        val selected = _state.value.selectedKeys.toMutableSet()
+        if (!selected.add(item.selectionKey)) selected.remove(item.selectionKey)
+        applySelection(selected)
+    }
+
+    fun selectAllFiles() {
+        applySelection(_state.value.scannedItems.map { it.selectionKey }.toSet())
+    }
+
+    fun clearAllFiles() {
+        applySelection(emptySet())
+    }
+
+    private fun applySelection(selected: Set<String>) {
+        val items = _state.value.scannedItems
+        selectionStore.saveSelected(selected)
+        _state.value = _state.value.copy(
+            selectedKeys = selected,
+            selectedBytes = items.filter { selected.contains(it.selectionKey) }.sumOf { it.size },
+            pending = selected.size
         )
     }
 
@@ -183,9 +238,17 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startBackup() {
+        if (_state.value.selectedKeys.isEmpty()) {
+            _state.value = _state.value.copy(message = "Select at least one file to back up.")
+            return
+        }
+
+        selectionStore.saveSelected(_state.value.selectedKeys)
+
         if (!DriveBackup(getApplication()).isConnected()) {
             _state.value = _state.value.copy(
                 driveConnected = false,
+                driveAccountEmail = null,
                 message = "Connect Google Drive first."
             )
             return
