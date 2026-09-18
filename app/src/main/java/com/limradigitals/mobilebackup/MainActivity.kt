@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -38,7 +39,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         vm = BackupViewModel(application)
         requestStoragePermissions()
-        setContent { MaterialTheme { BackupScreen(vm) } }
+        setContent { MaterialTheme { BackupScreen(vm, driveLauncher) } }
     }
 
     private fun requestStoragePermissions() {
@@ -59,7 +60,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BackupScreen(vm: BackupViewModel) {
+private fun BackupScreen(vm: BackupViewModel, driveLauncher: ActivityResultLauncher<android.content.Intent>) {
     val state by vm.state.collectAsState()
 
     Scaffold(topBar = { TopAppBar(title = { Text("Mobile Backup") }) }) { pad ->
