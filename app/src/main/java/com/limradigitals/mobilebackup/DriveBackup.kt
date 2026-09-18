@@ -34,8 +34,13 @@ class DriveBackup(private val context: Context) {
 
     private fun drive(): Drive {
         val a = account() ?: error("Connect Google Drive first")
-        val credential = GoogleAccountCredential.usingOAuth2(context, listOf(DriveScopes.DRIVE_FILE))
-            .apply { selectedAccount = a.account }
+        val credential = GoogleAccountCredential.usingOAuth2(
+            context,
+            listOf(DriveScopes.DRIVE_FILE)
+        ).apply {
+            selectedAccount = a.account
+        }
+
         return Drive.Builder(transport, json, credential)
             .setApplicationName("Mobile Backup")
             .build()
@@ -47,14 +52,30 @@ class DriveBackup(private val context: Context) {
     private fun folder(d: Drive, name: String, parent: String): String {
         val q = "'" + parent + "' in parents and name = '" + esc(name) +
             "' and mimeType = '" + FOLDER + "' and trashed = false"
-        val found = d.files().list().setQ(q).setSpaces("drive").setPageSize(10)
-            .setFields("files(id,name)").execute().files
+
+        val found = d.files().list()
+            .setQ(q)
+            .setSpaces("drive")
+            .setPageSize(10)
+            .setFields("files(id,name)")
+            .execute()
+            .files
+
         if (!found.isNullOrEmpty()) return found[0].id
+
         return d.files().create(File().apply {
             this.name = name
             mimeType = FOLDER
             parents = listOf(parent)
         }).setFields("id").execute().id
+    }
+
+    private fun categoryFolder(d: Drive, category: String, root: String): String {
+        var parent = root
+        category.split("/").filter { it.isNotBlank() }.forEach { part ->
+            parent = folder(d, part, parent)
+        }
+        return parent
     }
 
     private fun sourceKey(item: MediaItem): String {
@@ -65,8 +86,14 @@ class DriveBackup(private val context: Context) {
 
     private fun exists(d: Drive, key: String): Boolean {
         val q = "appProperties has { key='" + KEY + "' and value='" + key + "' } and trashed = false"
-        return !d.files().list().setQ(q).setSpaces("drive").setPageSize(1)
-            .setFields("files(id)").execute().files.isNullOrEmpty()
+        return !d.files().list()
+            .setQ(q)
+            .setSpaces("drive")
+            .setPageSize(1)
+            .setFields("files(id)")
+            .execute()
+            .files
+            .isNullOrEmpty()
     }
 
     fun upload(item: MediaItem): Boolean {
@@ -75,7 +102,8 @@ class DriveBackup(private val context: Context) {
         if (exists(d, key)) return true
 
         val root = folder(d, ROOT, "root")
-        val parent = folder(d, item.category, root)
+        val parent = categoryFolder(d, item.category, root)
+
         val stream = context.contentResolver.openInputStream(item.uri)
             ?: throw IOException("Cannot read " + item.name)
 
@@ -86,14 +114,17 @@ class DriveBackup(private val context: Context) {
                 parents = listOf(parent)
                 appProperties = mapOf(KEY to key)
             }
+
             val create = d.files().create(metadata, media).setFields("id,name,size")
             create.mediaHttpUploader.isDirectUploadEnabled = false
             create.mediaHttpUploader.chunkSize = 4 * 1024 * 1024
+
             val result = create.execute()
             if (result.id == null || result.size?.toLong() != item.size) {
                 throw IOException("Verification failed for " + item.name)
             }
         }
+
         return true
     }
 }
