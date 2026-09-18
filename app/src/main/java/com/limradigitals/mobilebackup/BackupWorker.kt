@@ -21,10 +21,19 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
 
         val prefs = BackupPrefs(applicationContext)
         val items = MediaScanner(applicationContext).scan(
-            prefs.images, prefs.videos, prefs.audio, prefs.downloads
+            phoneImages = prefs.phoneImages,
+            phoneVideos = prefs.phoneVideos,
+            phoneAudio = prefs.phoneAudio,
+            phoneDocuments = prefs.phoneDocuments,
+            whatsappImages = prefs.whatsappImages,
+            whatsappVideos = prefs.whatsappVideos,
+            whatsappAudio = prefs.whatsappAudio,
+            whatsappDocuments = prefs.whatsappDocuments,
+            downloads = prefs.downloads
         )
+
         if (items.isEmpty()) {
-            saveStatus("No files found.")
+            saveStatus("No files found for the selected categories.")
             return Result.success()
         }
 
@@ -40,18 +49,19 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                 setProgress(workDataOf(
                     "uploaded" to uploaded,
                     "total" to items.size,
-                    "name" to item.name
+                    "name" to item.name,
+                    "category" to item.category
                 ))
             } catch (e: Exception) {
                 failed++
                 if (e is IOException) {
-                    saveStatus("Paused after $uploaded files. Will retry on Wi-Fi.")
+                    saveStatus("Paused after " + uploaded + " files. Will retry on Wi-Fi.")
                     return Result.retry()
                 }
             }
         }
 
-        saveStatus("Backup complete: $uploaded uploaded, $failed failed.")
+        saveStatus("Backup complete: " + uploaded + " uploaded, " + failed + " failed.")
         return if (failed == 0) Result.success() else Result.retry()
     }
 
