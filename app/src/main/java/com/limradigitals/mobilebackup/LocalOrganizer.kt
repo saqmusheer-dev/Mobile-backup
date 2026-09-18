@@ -6,8 +6,10 @@ import android.os.Build
 import android.provider.MediaStore
 import java.io.IOException
 
+data class MoveResult(val moved: Int, val copiedOnly: Int)
+
 object LocalOrganizer {
-    fun copyToFolder(context: Context, items: List<MediaItem>, folderName: String): Int {
+    fun moveToFolder(context: Context, items: List<MediaItem>, folderName: String): MoveResult {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             throw IOException("Local folders require Android 10 or newer.")
         }
@@ -17,25 +19,24 @@ object LocalOrganizer {
             .trim()
         if (cleanFolder.isBlank()) throw IOException("Choose a folder name.")
 
-        var copied = 0
+        var moved = 0
+        var copiedOnly = 0
+
         items.forEach { item ->
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, item.name)
                 put(MediaStore.MediaColumns.MIME_TYPE, item.mimeType)
-                put(
-                    MediaStore.MediaColumns.RELATIVE_PATH,
-                    "Download/Mobile Backup/$cleanFolder"
-                )
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Mobile Backup/$cleanFolder")
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
 
-            val uri = context.contentResolver.insert(
+            val destination = context.contentResolver.insert(
                 MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
             ) ?: throw IOException("Cannot create " + item.name)
 
             try {
                 context.contentResolver.openInputStream(item.uri)?.use { input ->
-                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                    context.contentResolver.openOutputStream(destination)?.use { output ->
                         input.copyTo(output, 64 * 1024)
                     } ?: throw IOException("Cannot write " + item.name)
                 } ?: throw IOException("Cannot read " + item.name)
@@ -43,13 +44,21 @@ object LocalOrganizer {
                 val done = ContentValues().apply {
                     put(MediaStore.MediaColumns.IS_PENDING, 0)
                 }
-                context.contentResolver.update(uri, done, null, null)
-                copied++
+                context.contentResolver.update(destination, done, null, null)
+
+                val deleted = try {
+                    context.contentResolver.delete(item.uri, null, null) > 0
+                } catch (_: SecurityException) {
+                    false
+                }
+
+                if (deleted) moved++ else copiedOnly++
             } catch (e: Exception) {
-                context.contentResolver.delete(uri, null, null)
+                context.contentResolver.delete(destination, null, null)
                 throw e
             }
         }
-        return copied
+
+        return MoveResult(moved, copiedOnly)
     }
 }

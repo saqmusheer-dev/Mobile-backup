@@ -486,7 +486,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun copySelectedToFolder(folder: String) {
+    fun moveSelectedToFolder(folder: String) {
         val items = _state.value.scannedItems.filter {
             _state.value.selectedKeys.contains(it.selectionKey)
         }
@@ -497,14 +497,17 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _state.value = _state.value.copy(message = "Organizing files into $folder...")
-                val count = LocalOrganizer.copyToFolder(getApplication(), items, folder)
-                _state.value = _state.value.copy(
-                    message = "$count files copied to Download/Mobile Backup/$folder."
-                )
+                _state.value = _state.value.copy(message = "Moving files into $folder...")
+                val result = LocalOrganizer.moveToFolder(getApplication(), items, folder)
+                val message = if (result.copiedOnly == 0) {
+                    "${result.moved} files moved to Download/Mobile Backup/$folder."
+                } else {
+                    "${result.moved} moved, ${result.copiedOnly} copied only because Android did not allow deleting the original."
+                }
+                _state.value = _state.value.copy(message = message)
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
-                    message = "Organize failed: " + (e.message ?: e.javaClass.simpleName)
+                    message = "Move failed: " + (e.message ?: e.javaClass.simpleName)
                 )
             }
         }

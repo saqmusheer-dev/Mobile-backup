@@ -4,4 +4,12 @@
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#6750A4</item>
     </style>
+    <style name="Theme.MobileBackup.Splash" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowBackground">#6F4FB3</item>
+        <item name="android:statusBarColor">#6F4FB3</item>
+        <item name="android:navigationBarColor">#6F4FB3</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
 </resources>

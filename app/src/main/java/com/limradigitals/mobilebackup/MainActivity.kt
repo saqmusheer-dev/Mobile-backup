@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import com.google.android.gms.common.api.ApiException
@@ -151,7 +152,7 @@ private fun BackupApp(
                     NavigationBarItem(
                         selected = screen == name,
                         onClick = { screen = name },
-                        icon = { Text(icon) },
+                        icon = { Text(icon, fontSize = 25.sp) },
                         label = { Text(name) }
                     )
                 }
@@ -612,7 +613,7 @@ private fun OrganizeScreen(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Smart local organization", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Create visible folders under Downloads/Mobile Backup and copy your selected files there."
+                        "Create visible folders under Downloads/Mobile Backup and move your selected files there."
                     )
                     Text(
                         state.selectedKeys.size.toString() + " files currently selected",
@@ -634,7 +635,7 @@ private fun OrganizeScreen(
                 onClick = { showFolderPicker = true },
                 enabled = state.selectedKeys.isNotEmpty() && state.localFolders.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Organize Selected Files") }
+            ) { Text("Move Selected Files") }
         }
 
         if (state.localFolders.isEmpty()) {
@@ -652,7 +653,7 @@ private fun OrganizeScreen(
 
         item {
             Text(
-                "This first organizer version copies files safely. Original files are not deleted.",
+                "Files are copied first and the original is deleted only after a successful copy. If Android blocks deletion, the original remains.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
@@ -692,7 +693,7 @@ private fun OrganizeScreen(
                     state.localFolders.forEach { folder ->
                         TextButton(
                             onClick = {
-                                vm.copySelectedToFolder(folder)
+                                vm.moveSelectedToFolder(folder)
                                 showFolderPicker = false
                             },
                             modifier = Modifier.fillMaxWidth()
