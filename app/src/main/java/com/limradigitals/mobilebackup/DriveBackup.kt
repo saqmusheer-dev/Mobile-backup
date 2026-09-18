@@ -15,6 +15,11 @@ import com.google.api.services.drive.model.File
 import java.io.IOException
 import java.security.MessageDigest
 
+enum class UploadResult {
+    UPLOADED,
+    ALREADY_BACKED_UP
+}
+
 class DriveBackup(private val context: Context) {
     companion object {
         private const val ROOT = "Mobile Backup"
@@ -96,10 +101,11 @@ class DriveBackup(private val context: Context) {
             .isNullOrEmpty()
     }
 
-    fun upload(item: MediaItem): Boolean {
+    fun upload(item: MediaItem): UploadResult {
         val d = drive()
         val key = sourceKey(item)
-        if (exists(d, key)) return true
+
+        if (exists(d, key)) return UploadResult.ALREADY_BACKED_UP
 
         val root = folder(d, ROOT, "root")
         val parent = categoryFolder(d, item.category, root)
@@ -125,6 +131,6 @@ class DriveBackup(private val context: Context) {
             }
         }
 
-        return true
+        return UploadResult.UPLOADED
     }
 }
