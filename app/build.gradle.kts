@@ -1,7 +1,19 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+val fixedDebugKeystore = layout.buildDirectory.file("fixed-debug.keystore").get().asFile
+if (!fixedDebugKeystore.exists()) {
+    fixedDebugKeystore.parentFile.mkdirs()
+    fixedDebugKeystore.writeBytes(
+        Base64.getDecoder().decode(
+            file("fixed-debug-keystore.b64").readText().trim()
+        )
+    )
 }
 
 android {
@@ -13,6 +25,19 @@ android {
         targetSdk = 35
         versionCode = 2
         versionName = "0.2.0"
+    }
+    signingConfigs {
+        getByName("debug") {
+            storeFile = fixedDebugKeystore
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
