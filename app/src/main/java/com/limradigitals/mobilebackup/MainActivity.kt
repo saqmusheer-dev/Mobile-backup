@@ -9,9 +9,12 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -32,7 +35,7 @@ class MainActivity : ComponentActivity() {
             val task = com.google.android.gms.auth.api.signin.GoogleSignIn
                 .getSignedInAccountFromIntent(result.data)
             task.getResult(ApiException::class.java)
-            vm.driveConnected()
+            vm.driveConnected(task.result.email)
         } catch (e: ApiException) {
             val message = when (e.statusCode) {
                 10 -> "Google setup error (code 10). Add the Android OAuth client with the correct package name and SHA-1 in Google Cloud."
@@ -105,11 +108,18 @@ private fun BackupScreen(
                     Text(state.message)
                     Text("Files found: " + state.filesFound)
                     Text("Pending: " + state.pending)
+                    if (state.driveConnected && !state.driveAccountEmail.isNullOrBlank()) {
+                        Text("Connected as: " + state.driveAccountEmail)
+                    }
                 }
             }
 
             Button(onClick = vm::scan, modifier = Modifier.fillMaxWidth()) {
                 Text("Scan Selected Categories")
+            }
+
+            if (state.scannedItems.isNotEmpty()) {
+                FileSelectionCard(state, vm)
             }
 
             Button(
@@ -124,7 +134,13 @@ private fun BackupScreen(
                 onClick = { vm.connectDrive { driveLauncher.launch(it) } },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (state.driveConnected) "Google Drive Connected" else "Connect Google Drive")
+                Text(
+                    if (state.driveConnected) {
+                        if (!state.driveAccountEmail.isNullOrBlank())
+                            "Google Drive Connected • " + state.driveAccountEmail
+                        else "Google Drive Connected"
+                    } else "Connect Google Drive"
+                )
             }
 
             HorizontalDivider()
@@ -192,6 +208,110 @@ private fun BackupScreen(
             Spacer(Modifier.height(20.dp))
         }
     }
+}
+
+@Composable
+@Composable
+private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
+    var filter by remember { mutableStateOf("All") }
+
+    val filtered = remember(state.scannedItems, filter) {
+        when (filter) {
+            "Phone" -> state.scannedItems.filter { it.category.startsWith("Phone/") }
+            "WhatsApp" -> state.scannedItems.filter { it.category.startsWith("WhatsApp/") }
+            "Downloads" -> state.scannedItems.filter { it.category == "Downloads" }
+            else -> state.scannedItems
+        }
+    }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Files to upload", style = MaterialTheme.typography.titleMedium)
+            Text(
+                state.selectedKeys.size.toString() + " selected • " +
+                    formatBytes(state.selectedBytes) + " of " + formatBytes(state.totalBytes)
+            )
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                OutlinedButton(
+                    onClick = vm::selectAllFiles,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Select All") }
+                OutlinedButton(
+                    onClick = vm::clearAllFiles,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Clear All") }
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf("All", "Phone", "WhatsApp", "Downloads").forEach { option ->
+                    FilterChip(
+                        selected = filter == option,
+                        onClick = { filter = option },
+                        label = { Text(option) }
+                    )
+                }
+            }
+
+            Text(
+                "Showing " + filtered.size + " files",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                items(filtered, key = { it.selectionKey }) { item ->
+                    val selected = state.selectedKeys.contains(item.selectionKey)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = selected,
+                            onCheckedChange = { vm.toggleFile(item) }
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                item.name,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                            Text(
+                                item.category + " • " + formatBytes(item.size),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                    HorizontalDivider()
+                }
+            }
+        }
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024L) return bytes.toString() + " B"
+    val units = arrayOf("KB", "MB", "GB", "TB")
+    var value = bytes.toDouble()
+    var index = -1
+    while (value >= 1024 && index < units.lastIndex) {
+        value /= 1024
+        index++
+    }
+    return String.format(java.util.Locale.US, "%.1f %s", value, units[index])
 }
 
 @Composable
