@@ -456,6 +456,28 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(lastZipUri = null)
     }
 
+    fun saveZipTo(destination: Uri) {
+        val source = _state.value.lastZipUri ?: run {
+            setMessage("Create a ZIP first.")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val resolver = getApplication<Application>().contentResolver
+                resolver.openInputStream(source)?.use { input ->
+                    resolver.openOutputStream(destination)?.use { output ->
+                        input.copyTo(output, 64 * 1024)
+                    } ?: throw IOException("Cannot write the selected location.")
+                } ?: throw IOException("Cannot read the ZIP file.")
+                _state.value = _state.value.copy(message = "ZIP saved to the selected location.")
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    message = "Save failed: " + (e.message ?: e.javaClass.simpleName)
+                )
+            }
+        }
+    }
+
     fun uploadZipToDrive() {
         val uri = _state.value.lastZipUri ?: run {
             setMessage("Create a ZIP first.")

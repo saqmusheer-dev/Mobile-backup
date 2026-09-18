@@ -45,6 +45,14 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { }
 
+    private val saveZipLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            result.data?.data?.let { vm.saveZipTo(it) }
+        }
+    }
+
     private val driveLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -79,7 +87,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                BackupApp(vm, driveLauncher, ::shareZip)
+                BackupApp(vm, driveLauncher, ::shareZip, ::saveZip)
             }
         }
     }
@@ -106,6 +114,15 @@ class MainActivity : ComponentActivity() {
         if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
     }
 
+    private fun saveZip(uri: Uri) {
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            type = "application/zip"
+            putExtra(Intent.EXTRA_TITLE, "MobileBackup_" + System.currentTimeMillis() + ".zip")
+            addCategory(Intent.CATEGORY_OPENABLE)
+        }
+        saveZipLauncher.launch(intent)
+    }
+
     private fun shareZip(uri: Uri) {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "application/zip"
@@ -121,7 +138,8 @@ class MainActivity : ComponentActivity() {
 private fun BackupApp(
     vm: BackupViewModel,
     driveLauncher: ActivityResultLauncher<Intent>,
-    shareZip: (Uri) -> Unit
+    shareZip: (Uri) -> Unit,
+    saveZip: (Uri) -> Unit
 ) {
     val state by vm.state.collectAsState()
     var screen by remember { mutableStateOf("Backup") }
@@ -388,10 +406,14 @@ private fun BackupScreenContent(
                                 onClick = { shareZip(state.lastZipUri) },
                                 modifier = Modifier.weight(1f)
                             ) { Text("Share / Email") }
+                            OutlinedButton(
+                                onClick = { saveZip(state.lastZipUri) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Save Locally") }
                             Button(
                                 onClick = vm::uploadZipToDrive,
                                 enabled = state.driveConnected,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.fillMaxWidth()
                             ) { Text("Upload to Drive") }
                         }
                     }
