@@ -24,6 +24,9 @@ jobs:
           gradle-version: "8.10"
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
+      - name: Print APK signing certificate
+        run: keytool -printcert -jarfile app/build/outputs/apk/debug/app-debug.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
