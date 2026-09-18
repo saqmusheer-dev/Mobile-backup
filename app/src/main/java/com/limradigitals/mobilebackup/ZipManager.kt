@@ -73,7 +73,7 @@ object ZipManager {
     }
 
     private fun sanitize(name: String): String =
-        name.replace(Regex("[/\\:*?\"<>|]"), "_").trim()
+        name.replace(Regex("""[/\\:*?"<>|]"""), "_")
 
     private fun File.toUriCompat(context: Context, name: String): android.net.Uri {
         val values = ContentValues().apply {
