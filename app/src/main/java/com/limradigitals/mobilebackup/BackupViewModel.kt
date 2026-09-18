@@ -2,6 +2,10 @@ package com.limradigitals.mobilebackup
 
 import android.app.Application
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.Constraints
@@ -21,15 +25,20 @@ data class BackupUiState(
     val wifiOnly: Boolean = true,
     val autoBackup: Boolean = false,
     val deleteAfterVerified: Boolean = false,
-    val images: Boolean = true,
-    val videos: Boolean = true,
-    val audio: Boolean = true,
-    val downloads: Boolean = true
+    val phoneImages: Boolean = true,
+    val phoneVideos: Boolean = true,
+    val phoneAudio: Boolean = true,
+    val phoneDocuments: Boolean = true,
+    val whatsappImages: Boolean = true,
+    val whatsappVideos: Boolean = true,
+    val whatsappAudio: Boolean = true,
+    val whatsappDocuments: Boolean = true,
+    val downloads: Boolean = true,
+    val allFilesAccess: Boolean = false
 )
 
 class BackupViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = BackupPrefs(app)
-    private val scanner = MediaScanner(app)
     private val workManager = WorkManager.getInstance(app)
 
     private val _state = MutableStateFlow(
@@ -38,10 +47,16 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             wifiOnly = prefs.wifiOnly,
             autoBackup = prefs.autoBackup,
             deleteAfterVerified = prefs.deleteAfterVerified,
-            images = prefs.images,
-            videos = prefs.videos,
-            audio = prefs.audio,
-            downloads = prefs.downloads
+            phoneImages = prefs.phoneImages,
+            phoneVideos = prefs.phoneVideos,
+            phoneAudio = prefs.phoneAudio,
+            phoneDocuments = prefs.phoneDocuments,
+            whatsappImages = prefs.whatsappImages,
+            whatsappVideos = prefs.whatsappVideos,
+            whatsappAudio = prefs.whatsappAudio,
+            whatsappDocuments = prefs.whatsappDocuments,
+            downloads = prefs.downloads,
+            allFilesAccess = hasAllFilesAccess()
         )
     )
     val state = _state.asStateFlow()
@@ -50,14 +65,50 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(message = message)
     }
 
+    fun refreshStorageAccess() {
+        _state.value = _state.value.copy(allFilesAccess = hasAllFilesAccess())
+    }
+
+    fun openAllFilesAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:" + getApplication<Application>().packageName)
+            )
+            getApplication<Application>().startActivity(
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
+    private fun hasAllFilesAccess(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+
     fun scan() {
         viewModelScope.launch {
-            _state.value = _state.value.copy(message = "Scanning phone media...")
-            val count = scanner.scan(prefs.images, prefs.videos, prefs.audio, prefs.downloads).size
+            _state.value = _state.value.copy(message = "Scanning selected categories...")
+            val count = MediaScanner(getApplication()).scan(
+                phoneImages = prefs.phoneImages,
+                phoneVideos = prefs.phoneVideos,
+                phoneAudio = prefs.phoneAudio,
+                phoneDocuments = prefs.phoneDocuments,
+                whatsappImages = prefs.whatsappImages,
+                whatsappVideos = prefs.whatsappVideos,
+                whatsappAudio = prefs.whatsappAudio,
+                whatsappDocuments = prefs.whatsappDocuments,
+                downloads = prefs.downloads
+            ).size
+
+            val needsAllFiles = prefs.phoneDocuments || prefs.whatsappDocuments
+            val warning = if (needsAllFiles && !hasAllFilesAccess() && Build.VERSION.SDK_INT >= 30) {
+                " Documents need full storage access."
+            } else ""
+
             _state.value = _state.value.copy(
-                message = "Scan complete.",
+                message = "Scan complete." + warning,
                 filesFound = count,
-                pending = count
+                pending = count,
+                allFilesAccess = hasAllFilesAccess()
             )
         }
     }
@@ -67,10 +118,13 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
         )
             .requestEmail()
-            .requestScopes(com.google.android.gms.common.api.Scope(
-                com.google.api.services.drive.DriveScopes.DRIVE_FILE
-            ))
+            .requestScopes(
+                com.google.android.gms.common.api.Scope(
+                    com.google.api.services.drive.DriveScopes.DRIVE_FILE
+                )
+            )
             .build()
+
         onIntent(
             com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(
                 getApplication(), options
@@ -104,22 +158,39 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setCategory(which: String, value: Boolean) {
         when (which) {
-            "images" -> prefs.images = value
-            "videos" -> prefs.videos = value
-            "audio" -> prefs.audio = value
+            "phoneImages" -> prefs.phoneImages = value
+            "phoneVideos" -> prefs.phoneVideos = value
+            "phoneAudio" -> prefs.phoneAudio = value
+            "phoneDocuments" -> prefs.phoneDocuments = value
+            "whatsappImages" -> prefs.whatsappImages = value
+            "whatsappVideos" -> prefs.whatsappVideos = value
+            "whatsappAudio" -> prefs.whatsappAudio = value
+            "whatsappDocuments" -> prefs.whatsappDocuments = value
             "downloads" -> prefs.downloads = value
         }
+
         _state.value = _state.value.copy(
-            images = prefs.images, videos = prefs.videos,
-            audio = prefs.audio, downloads = prefs.downloads
+            phoneImages = prefs.phoneImages,
+            phoneVideos = prefs.phoneVideos,
+            phoneAudio = prefs.phoneAudio,
+            phoneDocuments = prefs.phoneDocuments,
+            whatsappImages = prefs.whatsappImages,
+            whatsappVideos = prefs.whatsappVideos,
+            whatsappAudio = prefs.whatsappAudio,
+            whatsappDocuments = prefs.whatsappDocuments,
+            downloads = prefs.downloads
         )
     }
 
     fun startBackup() {
         if (!DriveBackup(getApplication()).isConnected()) {
-            _state.value = _state.value.copy(message = "Connect Google Drive first.")
+            _state.value = _state.value.copy(
+                driveConnected = false,
+                message = "Connect Google Drive first."
+            )
             return
         }
+
         enqueueBackup()
         _state.value = _state.value.copy(
             message = if (prefs.wifiOnly) "Backup queued. Waiting for Wi-Fi..." else "Backup queued."
@@ -130,24 +201,34 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(prefs.networkType())
             .build()
+
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
             .setConstraints(constraints)
             .setBackoffCriteria(
                 androidx.work.BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS
             )
             .build()
-        workManager.enqueueUniqueWork("mobile-backup-now", ExistingWorkPolicy.KEEP, request)
+
+        workManager.enqueueUniqueWork(
+            "mobile-backup-now",
+            ExistingWorkPolicy.KEEP,
+            request
+        )
     }
 
     private fun scheduleAutomaticBackup() {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(prefs.networkType())
             .build()
+
         val request = androidx.work.PeriodicWorkRequestBuilder<BackupWorker>(
             15, TimeUnit.MINUTES
         ).setConstraints(constraints).build()
+
         workManager.enqueueUniquePeriodicWork(
-            "mobile-backup", androidx.work.ExistingPeriodicWorkPolicy.UPDATE, request
+            "mobile-backup",
+            androidx.work.ExistingPeriodicWorkPolicy.UPDATE,
+            request
         )
     }
 }
