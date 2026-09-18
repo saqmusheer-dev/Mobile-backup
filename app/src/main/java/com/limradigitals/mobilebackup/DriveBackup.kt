@@ -90,7 +90,7 @@ class DriveBackup(private val context: Context) {
             create.mediaHttpUploader.isDirectUploadEnabled = false
             create.mediaHttpUploader.chunkSize = 4 * 1024 * 1024
             val result = create.execute()
-            if (result.id == null || result.size != item.size) {
+            if (result.id == null || result.size?.toLong() != item.size) {
                 throw IOException("Verification failed for " + item.name)
             }
         }
