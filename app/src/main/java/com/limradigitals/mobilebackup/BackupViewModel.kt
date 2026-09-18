@@ -41,7 +41,14 @@ data class BackupUiState(
     val scannedItems: List<MediaItem> = emptyList(),
     val selectedKeys: Set<String> = emptySet(),
     val selectedBytes: Long = 0L,
-    val totalBytes: Long = 0L
+    val totalBytes: Long = 0L,
+    val backupRunning: Boolean = false,
+    val backupCompleted: Int = 0,
+    val backupTotal: Int = 0,
+    val backupUploaded: Int = 0,
+    val backupAlready: Int = 0,
+    val backupFailed: Int = 0,
+    val backupCurrentName: String = ""
 )
 
 class BackupViewModel(app: Application) : AndroidViewModel(app) {
@@ -75,6 +82,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         when (work.state) {
             WorkInfo.State.ENQUEUED -> {
                 _state.value = _state.value.copy(
+                    backupRunning = false,
                     message = if (prefs.wifiOnly)
                         "Backup queued. Waiting for Wi-Fi..."
                     else
@@ -82,30 +90,67 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             WorkInfo.State.RUNNING -> {
+                val completed = work.progress.getInt("completed", 0)
                 val uploaded = work.progress.getInt("uploaded", 0)
+                val already = work.progress.getInt("already", 0)
+                val failed = work.progress.getInt("failed", 0)
                 val total = work.progress.getInt("total", _state.value.selectedKeys.size)
                 val name = work.progress.getString("name").orEmpty()
-                val detail = if (name.isBlank()) "" else " • " + name
+                val phase = work.progress.getString("phase").orEmpty()
+
+                val message = when (phase) {
+                    "uploading" -> "Uploading " + (completed + 1).coerceAtMost(total) +
+                        " of " + total + " • " + name
+                    "uploaded" -> "Uploaded " + completed + " of " + total
+                    else -> "Starting backup..."
+                }
+
                 _state.value = _state.value.copy(
-                    message = "Backing up " + uploaded + " of " + total + detail
+                    backupRunning = true,
+                    backupCompleted = completed,
+                    backupTotal = total,
+                    backupUploaded = uploaded,
+                    backupAlready = already,
+                    backupFailed = failed,
+                    backupCurrentName = name,
+                    pending = (total - completed).coerceAtLeast(0),
+                    message = message
                 )
             }
             WorkInfo.State.SUCCEEDED -> {
+                val completed = work.outputData.getInt("completed", _state.value.backupTotal)
+                val uploaded = work.outputData.getInt("uploaded", _state.value.backupUploaded)
+                val already = work.outputData.getInt("already", _state.value.backupAlready)
+                val failed = work.outputData.getInt("failed", _state.value.backupFailed)
                 _state.value = _state.value.copy(
+                    backupRunning = false,
+                    backupCompleted = completed,
+                    backupUploaded = uploaded,
+                    backupAlready = already,
+                    backupFailed = failed,
+                    pending = 0,
+                    backupCurrentName = "",
                     message = work.outputData.getString("message") ?: "Backup complete."
                 )
             }
             WorkInfo.State.FAILED -> {
                 _state.value = _state.value.copy(
+                    backupRunning = false,
                     message = work.outputData.getString("message")
                         ?: "Backup failed. Please try again."
                 )
             }
             WorkInfo.State.CANCELLED -> {
-                _state.value = _state.value.copy(message = "Backup cancelled.")
+                _state.value = _state.value.copy(
+                    backupRunning = false,
+                    message = "Backup cancelled."
+                )
             }
             WorkInfo.State.BLOCKED -> {
-                _state.value = _state.value.copy(message = "Backup is waiting to start...")
+                _state.value = _state.value.copy(
+                    backupRunning = false,
+                    message = "Backup is waiting to start..."
+                )
             }
         }
     }
@@ -302,13 +347,23 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        enqueueBackup()
+        val total = _state.value.selectedKeys.size
         _state.value = _state.value.copy(
+            backupRunning = true,
+            backupCompleted = 0,
+            backupTotal = total,
+            backupUploaded = 0,
+            backupAlready = 0,
+            backupFailed = 0,
+            backupCurrentName = "",
+            pending = total,
             message = if (prefs.wifiOnly)
                 "Backup queued. Waiting for Wi-Fi..."
             else
                 "Backup queued. Starting..."
         )
+
+        enqueueBackup()
     }
 
     private fun enqueueBackup() {
