@@ -14,7 +14,16 @@ import androidx.work.workDataOf
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.common.api.Scope
 import com.google.api.services.drive.DriveScopes
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class BackupWorker(appContext: Context, params: WorkerParameters) :
     CoroutineWorker(appContext, params) {
@@ -22,10 +31,11 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
     companion object {
         private const val CHANNEL_ID = "backup_progress"
         private const val NOTIFICATION_ID = 4101
+        private const val MAX_CONCURRENT_UPLOADS = 3
     }
 
     override suspend fun doWork(): Result {
-        setForeground(createForegroundInfo("Preparing backup…", 0, 0))
+        setForeground(createForegroundInfo("Starting upload…", 0, 0))
 
         val prefs = BackupPrefs(applicationContext)
 
@@ -59,150 +69,177 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
 
         val drive = DriveBackup(applicationContext)
         val selectionStore = SelectionStore(applicationContext)
-        val knownBackedUpKeys = selectionStore.loadBackedUp().toMutableSet()
-        // Reuse the backup status already discovered by the app scan. This avoids
-        // another Drive search immediately before the actual upload.
-        var uploaded = 0
-        var alreadyBackedUp = 0
-        var failed = 0
-        var completed = 0
+        val knownBackedUpKeys = ConcurrentHashMap.newKeySet<String>().apply {
+            addAll(selectionStore.loadBackedUp())
+        }
+
+        val uploaded = AtomicInteger(0)
+        val alreadyBackedUp = AtomicInteger(0)
+        val failed = AtomicInteger(0)
+        val completed = AtomicInteger(0)
+        val completedBytes = AtomicLong(0L)
+        val activeBytes = ConcurrentHashMap<String, Long>()
         val totalBytes = items.sumOf { it.size }
-        var completedBytes = 0L
+        val semaphore = Semaphore(MAX_CONCURRENT_UPLOADS)
+        val saveLock = Any()
 
-        setProgress(workDataOf(
-            "completed" to 0,
-            "completedBytes" to 0L,
-            "totalBytes" to totalBytes,
-            "uploaded" to 0,
-            "already" to 0,
-            "failed" to 0,
-            "total" to items.size,
-            "name" to "",
-            "phase" to "starting"
-        ))
-        setForeground(createForegroundInfo("Starting backup…", 0, items.size))
-
-        for (item in items) {
-            if (isStopped) return Result.retry()
-
-            setProgress(workDataOf(
-                "completed" to completed,
-                "completedBytes" to completedBytes,
-                "totalBytes" to totalBytes,
-                "uploaded" to uploaded,
-                "already" to alreadyBackedUp,
-                "failed" to failed,
-                "total" to items.size,
-                "name" to item.name,
-                "phase" to "uploading"
-            ))
-            setForeground(
-                createForegroundInfo(
-                    "Uploading " + (completed + 1).coerceAtMost(items.size) +
-                        " of " + items.size + " • " + item.name,
-                    completed,
-                    items.size
-                )
-            )
-
-            try {
-                var lastReportedBytes = completedBytes
-                when (drive.upload(item, knownBackedUpKeys, { currentFraction ->
-                    val currentBytes = (item.size * currentFraction.coerceIn(0.0, 1.0)).toLong()
-                    val overallBytes = completedBytes + currentBytes
-                    if (overallBytes - lastReportedBytes >= 256L * 1024L ||
-                        currentFraction >= 1.0
-                    ) {
-                        lastReportedBytes = overallBytes
-                        setProgressAsync(workDataOf(
-                            "completed" to completed,
-                            "completedBytes" to overallBytes,
-                            "totalBytes" to totalBytes,
-                            "uploaded" to uploaded,
-                            "already" to alreadyBackedUp,
-                            "failed" to failed,
-                            "total" to items.size,
-                            "name" to item.name,
-                            "phase" to "uploading"
-                        ))
-                    }
-                }, prefs.driveDestinationId)) {
-                    UploadResult.UPLOADED -> {
-                        uploaded++
-                        knownBackedUpKeys.add(drive.backupKey(item))
-                        if ((uploaded + alreadyBackedUp) % 10 == 0) selectionStore.saveBackedUp(knownBackedUpKeys)
-                    }
-                    UploadResult.ALREADY_BACKED_UP -> {
-                        alreadyBackedUp++
-                        knownBackedUpKeys.add(drive.backupKey(item))
-                        if ((uploaded + alreadyBackedUp) % 10 == 0) selectionStore.saveBackedUp(knownBackedUpKeys)
-                    }
-                }
-                completed++
-                completedBytes += item.size
-
-                setProgress(workDataOf(
-                    "completed" to completed,
-                    "completedBytes" to completedBytes,
-                    "totalBytes" to totalBytes,
-                    "uploaded" to uploaded,
-                    "already" to alreadyBackedUp,
-                    "failed" to failed,
-                    "total" to items.size,
-                    "name" to item.name,
-                    "phase" to if (completed == items.size) "complete" else "uploaded"
-                ))
-                setForeground(
-                    createForegroundInfo(
-                        "Processed " + completed + " of " + items.size,
-                        completed,
-                        items.size
-                    )
-                )
-            } catch (e: Exception) {
-                failed++
-                completed++
-
-                setProgress(workDataOf(
-                    "completed" to completed,
-                    "completedBytes" to completedBytes,
-                    "totalBytes" to totalBytes,
-                    "uploaded" to uploaded,
-                    "already" to alreadyBackedUp,
-                    "failed" to failed,
-                    "total" to items.size,
-                    "name" to item.name,
-                    "phase" to "failed",
-                    "error" to (e.message ?: e.javaClass.simpleName)
-                ))
-
-                if (e is IOException) {
-                    selectionStore.saveBackedUp(knownBackedUpKeys)
-                    saveStatus("Paused after " + completed + " of " + items.size + " files. Will retry.")
-                    return Result.retry()
-                }
+        fun saveKnownKeys() {
+            synchronized(saveLock) {
+                selectionStore.saveBackedUp(knownBackedUpKeys)
             }
         }
 
-        selectionStore.saveBackedUp(knownBackedUpKeys)
-        val message = "Backup complete: " + uploaded + " uploaded, " +
-            alreadyBackedUp + " already backed up, " + failed + " failed."
-        saveStatus(message)
-
-        return if (failed == 0) {
-            Result.success(workDataOf(
-                "message" to message,
-                "completed" to completed,
-                "completedBytes" to completedBytes,
+        setProgress(
+            workDataOf(
+                "completed" to 0,
+                "completedBytes" to 0L,
                 "totalBytes" to totalBytes,
-                "uploaded" to uploaded,
-                "already" to alreadyBackedUp,
-                "failed" to failed,
-                "total" to items.size
-            ))
-        } else {
-            Result.retry()
+                "uploaded" to 0,
+                "already" to 0,
+                "failed" to 0,
+                "total" to items.size,
+                "name" to "",
+                "phase" to "starting"
+            )
+        )
+        setForeground(createForegroundInfo("Uploading 0 of ${items.size}…", 0, items.size))
+
+        val results = coroutineScope {
+            items.map { item ->
+                async(Dispatchers.IO) {
+                    semaphore.withPermit {
+                        if (isStopped) return@withPermit FileOutcome.STOPPED
+
+                        activeBytes[item.selectionKey] = 0L
+                        try {
+                            val result = drive.upload(
+                                item,
+                                knownBackedUpKeys,
+                                { fraction ->
+                                    val current = (item.size * fraction.coerceIn(0.0, 1.0)).toLong()
+                                    activeBytes[item.selectionKey] = current
+
+                                    if (fraction >= 1.0 || current >= 256L * 1024L) {
+                                        setProgressAsync(
+                                            workDataOf(
+                                                "completed" to completed.get(),
+                                                "completedBytes" to (completedBytes.get() + activeBytes.values.sum()),
+                                                "totalBytes" to totalBytes,
+                                                "uploaded" to uploaded.get(),
+                                                "already" to alreadyBackedUp.get(),
+                                                "failed" to failed.get(),
+                                                "total" to items.size,
+                                                "name" to item.name,
+                                                "phase" to "uploading"
+                                            )
+                                        )
+                                    }
+                                },
+                                prefs.driveDestinationId
+                            )
+
+                            when (result) {
+                                UploadResult.UPLOADED -> {
+                                    uploaded.incrementAndGet()
+                                    knownBackedUpKeys.add(drive.backupKey(item))
+                                }
+                                UploadResult.ALREADY_BACKED_UP -> {
+                                    alreadyBackedUp.incrementAndGet()
+                                    knownBackedUpKeys.add(drive.backupKey(item))
+                                }
+                            }
+
+                            completedBytes.addAndGet(item.size)
+                            activeBytes.remove(item.selectionKey)
+                            val done = completed.incrementAndGet()
+
+                            if ((uploaded.get() + alreadyBackedUp.get()) % 10 == 0) {
+                                saveKnownKeys()
+                            }
+
+                            setProgressAsync(
+                                workDataOf(
+                                    "completed" to done,
+                                    "completedBytes" to (completedBytes.get() + activeBytes.values.sum()),
+                                    "totalBytes" to totalBytes,
+                                    "uploaded" to uploaded.get(),
+                                    "already" to alreadyBackedUp.get(),
+                                    "failed" to failed.get(),
+                                    "total" to items.size,
+                                    "name" to item.name,
+                                    "phase" to if (done == items.size) "complete" else "uploaded"
+                                )
+                            )
+
+                            FileOutcome.SUCCESS
+                        } catch (e: Exception) {
+                            activeBytes.remove(item.selectionKey)
+                            failed.incrementAndGet()
+                            val done = completed.incrementAndGet()
+
+                            setProgressAsync(
+                                workDataOf(
+                                    "completed" to done,
+                                    "completedBytes" to completedBytes.get(),
+                                    "totalBytes" to totalBytes,
+                                    "uploaded" to uploaded.get(),
+                                    "already" to alreadyBackedUp.get(),
+                                    "failed" to failed.get(),
+                                    "total" to items.size,
+                                    "name" to item.name,
+                                    "phase" to "failed",
+                                    "error" to (e.message ?: e.javaClass.simpleName)
+                                )
+                            )
+
+                            if (e is IOException) {
+                                saveKnownKeys()
+                                FileOutcome.RETRYABLE_FAILURE
+                            } else {
+                                FileOutcome.PERMANENT_FAILURE
+                            }
+                        }
+                    }
+                }
+            }.awaitAll()
         }
+
+        if (isStopped) {
+            saveKnownKeys()
+            return Result.retry()
+        }
+
+        saveKnownKeys()
+
+        val retryableFailures = results.count { it == FileOutcome.RETRYABLE_FAILURE }
+        val message = "Backup complete: ${uploaded.get()} uploaded, " +
+            "${alreadyBackedUp.get()} already backed up, ${failed.get()} failed."
+
+        if (retryableFailures > 0) {
+            saveStatus("Some uploads need another attempt. " + message)
+            return Result.retry()
+        }
+
+        saveStatus(message)
+        return Result.success(
+            workDataOf(
+                "message" to message,
+                "completed" to completed.get(),
+                "completedBytes" to completedBytes.get(),
+                "totalBytes" to totalBytes,
+                "uploaded" to uploaded.get(),
+                "already" to alreadyBackedUp.get(),
+                "failed" to failed.get(),
+                "total" to items.size
+            )
+        )
+    }
+
+    private enum class FileOutcome {
+        SUCCESS,
+        RETRYABLE_FAILURE,
+        PERMANENT_FAILURE,
+        STOPPED
     }
 
     private fun createForegroundInfo(text: String, completed: Int, total: Int): ForegroundInfo {
@@ -238,7 +275,6 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         )
     }
-
 
     private fun saveStatus(message: String) {
         applicationContext.getSharedPreferences("backup_status", Context.MODE_PRIVATE)
