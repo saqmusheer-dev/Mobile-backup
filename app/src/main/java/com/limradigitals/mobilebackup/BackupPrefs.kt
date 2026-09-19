@@ -27,5 +27,13 @@ class BackupPrefs(context: Context) {
     var videos: Boolean get() = phoneVideos; set(v) { phoneVideos = v }
     var audio: Boolean get() = phoneAudio; set(v) { phoneAudio = v }
 
+    var driveDestinationId: String?
+        get() = p.getString("driveDestinationId", null)
+        set(v) = p.edit().putString("driveDestinationId", v).apply()
+
+    var driveDestinationName: String
+        get() = p.getString("driveDestinationName", "Mobile Backup (default)") ?: "Mobile Backup (default)"
+        set(v) = p.edit().putString("driveDestinationName", v).apply()
+
     fun networkType(): NetworkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
 }
