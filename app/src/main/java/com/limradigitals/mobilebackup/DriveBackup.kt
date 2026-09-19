@@ -265,16 +265,12 @@ class DriveBackup(private val context: Context) {
                     }
                 )
             }
-            // Keep the Google client's normal HTTP content handling here.
-            // This is the known-good upload path; do not add custom transfer
-            // encoding/compression behavior to the media request.
-            // Small files use one direct request; larger files use large
-            // resumable chunks for reliability without tiny request overhead.
-            create.mediaHttpUploader.isDirectUploadEnabled =
-                item.size <= 5L * 1024L * 1024L
-            if (!create.mediaHttpUploader.isDirectUploadEnabled) {
-                create.mediaHttpUploader.chunkSize = 8 * 1024 * 1024
-            }
+            // Use resumable upload for every backup file. On mobile networks,
+            // the final response of a direct upload can fail after most bytes
+            // have already been sent. Resumable upload is designed to recover
+            // from interruptions and is the safer transport for backup.
+            create.mediaHttpUploader.isDirectUploadEnabled = false
+            create.mediaHttpUploader.chunkSize = 8 * 1024 * 1024
 
             val result = create.execute()
             if (result.id == null || result.size?.toLong() != item.size) {
