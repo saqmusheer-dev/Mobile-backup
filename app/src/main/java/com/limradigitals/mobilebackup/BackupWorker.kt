@@ -266,7 +266,7 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                             activeBytes.remove(item.selectionKey)
                             failed.incrementAndGet()
                             completed.incrementAndGet()
-                            val detail = e.message?.take(180) ?: e.javaClass.simpleName
+                            val detail = (e.message?.take(180) ?: e.toString().take(180))
                             firstError.compareAndSet(null, item.name + ": " + detail)
 
                             publishProgress(
