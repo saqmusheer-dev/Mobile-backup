@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
-            vm.deleteSelectedFiles()
+            vm.finishDeleteSelectedFiles()
         } else {
             vm.setMessage("Delete cancelled. No files were deleted.")
         }
