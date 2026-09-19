@@ -65,11 +65,8 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         }
 
         val drive = DriveBackup(applicationContext)
-        val knownBackedUpKeys = try {
-            drive.findBackedUpKeys().toMutableSet()
-        } catch (_: Exception) {
-            null
-        }
+        // Check only the files selected for this backup. Scanning every Drive file
+        // before each backup can be very slow on accounts with thousands of files.
         var uploaded = 0
         var alreadyBackedUp = 0
         var failed = 0
@@ -108,11 +105,10 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
             )
 
             try {
-                when (drive.upload(item, knownBackedUpKeys)) {
+                when (drive.upload(item, null)) {
                     UploadResult.UPLOADED -> {
                         uploaded++
-                        knownBackedUpKeys?.add(drive.backupKey(item))
-                    }
+                     }
                     UploadResult.ALREADY_BACKED_UP -> alreadyBackedUp++
                 }
                 completed++
