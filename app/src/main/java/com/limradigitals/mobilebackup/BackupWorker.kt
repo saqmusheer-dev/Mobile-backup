@@ -102,6 +102,32 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                 "phase" to "starting"
             )
         )
+        setForeground(createForegroundInfo("Preparing Drive destination…", 0, items.size))
+
+        // Resolve Drive folders BEFORE starting parallel uploads. This removes
+        // folder discovery/creation from the critical upload path and prevents
+        // concurrent workers from racing on the same category folder.
+        val resolvedParents = HashMap<String, String>()
+        try {
+            items.forEach { item ->
+                val parentKey = prefs.driveDestinationId?.takeIf { it.isNotBlank() }
+                    ?: item.category
+                if (!resolvedParents.containsKey(parentKey)) {
+                    resolvedParents[parentKey] = drive.resolveUploadParent(
+                        item,
+                        prefs.driveDestinationId
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            saveKnownKeys()
+            val message = "Could not prepare Google Drive destination: " +
+                (e.message ?: e.javaClass.simpleName)
+            saveStatus(message)
+            return if (e is IOException) Result.retry()
+            else Result.failure(workDataOf("message" to message))
+        }
+
         setForeground(createForegroundInfo("Uploading 0 of ${items.size}…", 0, items.size))
 
         val results = coroutineScope {
@@ -135,7 +161,11 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                                         )
                                     }
                                 },
-                                prefs.driveDestinationId
+                                prefs.driveDestinationId,
+                                resolvedParents[
+                                    prefs.driveDestinationId?.takeIf { it.isNotBlank() }
+                                        ?: item.category
+                                ]
                             )
 
                             when (result) {
