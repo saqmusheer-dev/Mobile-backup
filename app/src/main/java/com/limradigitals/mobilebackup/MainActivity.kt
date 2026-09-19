@@ -199,6 +199,7 @@ private fun GalleryScreen(
     onOrganize: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val images = remember(state.scannedItems) {
         state.scannedItems.filter {
             it.mimeType.startsWith("image/") || it.category.endsWith("/Images")
@@ -291,8 +292,7 @@ private fun GalleryTile(
                 }
             }
 
-            if (selected) {
-                Surface(
+            Surface(
                     modifier = Modifier.padding(6.dp).align(Alignment.TopEnd).size(32.dp).clickable(onClick = onSelect),
                     shape = RoundedCornerShape(50),
                     color = MaterialTheme.colorScheme.primary
