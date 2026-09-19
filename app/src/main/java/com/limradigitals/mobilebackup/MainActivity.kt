@@ -212,6 +212,10 @@ private fun BackupApp(
         }
     }
 
+    if (showDrivePicker) {
+        DriveFolderPickerDialog(state, vm) { showDrivePicker = false }
+    }
+
     if (state.backupRunning) {
         BackupProgressDialog(state, vm)
     }
@@ -458,6 +462,8 @@ private fun BackupScreenContent(
     shareZip: (Uri) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showDrivePicker by remember { mutableStateOf(false) }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -499,6 +505,32 @@ private fun BackupScreenContent(
 
         if (state.backupTotal > 0) {
             item { BackupProgressCard(state) }
+        }
+
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Google Drive destination", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        state.driveDestinationName,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "Files will be placed in this folder, with Mobile Backup category folders underneath.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedButton(
+                        onClick = { showDrivePicker = true },
+                        enabled = state.driveConnected,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Select / Create Drive Folder")
+                    }
+                }
+            }
         }
 
         item {
@@ -565,6 +597,146 @@ private fun BackupScreenContent(
                 style = MaterialTheme.typography.bodySmall
             )
         }
+    }
+}
+
+@Composable
+private fun DriveFolderPickerDialog(
+    state: BackupUiState,
+    vm: BackupViewModel,
+    onDismiss: () -> Unit
+) {
+    var currentId by remember { mutableStateOf("root") }
+    var currentName by remember { mutableStateOf("My Drive") }
+    var stack by remember { mutableStateOf(listOf<Pair<String, String>>()) }
+    var folders by remember { mutableStateOf<List<DriveFolder>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var showCreate by remember { mutableStateOf(false) }
+    var newFolderName by remember { mutableStateOf("") }
+
+    LaunchedEffect(currentId) {
+        loading = true
+        folders = try {
+            vm.listDriveFolders(currentId)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        loading = false
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Google Drive folder") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (stack.isNotEmpty()) {
+                    TextButton(
+                        onClick = {
+                            val parent = stack.last()
+                            stack = stack.dropLast(1)
+                            currentId = parent.first
+                            currentName = parent.second
+                        }
+                    ) { Text("← Back") }
+                }
+
+                Text(currentName, style = MaterialTheme.typography.titleMedium)
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            vm.setDriveDestination(null, "Mobile Backup (default)")
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Default") }
+
+                    Button(
+                        onClick = {
+                            vm.setDriveDestination(currentId, currentName)
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Use this folder") }
+                }
+
+                OutlinedButton(
+                    onClick = { showCreate = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("+ Create folder here") }
+
+                if (loading) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                } else if (folders.isEmpty()) {
+                    Text("No folders here.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 320.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(folders, key = { it.id }) { folder ->
+                            OutlinedButton(
+                                onClick = {
+                                    stack = stack + (currentId to currentName)
+                                    currentId = folder.id
+                                    currentName = folder.name
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("📁  " + folder.name, modifier = Modifier.weight(1f))
+                                Text("Open")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
+
+    if (showCreate) {
+        AlertDialog(
+            onDismissRequest = { showCreate = false },
+            title = { Text("Create Drive folder") },
+            text = {
+                OutlinedTextField(
+                    value = newFolderName,
+                    onValueChange = { newFolderName = it },
+                    label = { Text("Folder name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newFolderName.trim().isNotEmpty(),
+                    onClick = {
+                        val name = newFolderName.trim()
+                        showCreate = false
+                        newFolderName = ""
+                        kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+                            try {
+                                val created = vm.createDriveFolder(name, currentId)
+                                vm.setDriveDestination(created.id, created.name)
+                                onDismiss()
+                            } catch (e: Exception) {
+                                vm.setMessage(
+                                    "Could not create Drive folder: " +
+                                        (e.message ?: e.javaClass.simpleName)
+                                )
+                            }
+                        }
+                    }
+                ) { Text("Create & use") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreate = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
