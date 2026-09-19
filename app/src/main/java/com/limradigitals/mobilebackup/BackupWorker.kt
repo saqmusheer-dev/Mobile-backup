@@ -20,7 +20,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
@@ -33,7 +35,7 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
     companion object {
         private const val CHANNEL_ID = "backup_progress"
         private const val NOTIFICATION_ID = 4101
-        private const val MAX_CONCURRENT_UPLOADS = 3
+        private const val MAX_CONCURRENT_UPLOADS = 4
     }
 
     override suspend fun doWork(): Result {
@@ -98,7 +100,33 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         val activeBytes = ConcurrentHashMap<String, Long>()
         val totalBytes = items.sumOf { it.size }
         val semaphore = Semaphore(MAX_CONCURRENT_UPLOADS)
+        val progressMutex = Mutex()
         val saveLock = Any()
+
+        suspend fun publishProgress(
+            name: String,
+            phase: String,
+            bytes: Long = (completedBytes.get() + activeBytes.values.sum()).coerceIn(0L, totalBytes)
+        ) {
+            // Serialize progress writes. Multiple upload coroutines can finish
+            // in a different order than they started; without this, an older
+            // WorkManager progress snapshot can overwrite a newer one in the UI.
+            progressMutex.withLock {
+                setProgress(
+                    workDataOf(
+                        "completed" to completed.get(),
+                        "completedBytes" to bytes,
+                        "totalBytes" to totalBytes,
+                        "uploaded" to uploaded.get(),
+                        "already" to alreadyBackedUp.get(),
+                        "failed" to failed.get(),
+                        "total" to items.size,
+                        "name" to name,
+                        "phase" to phase
+                    )
+                )
+            }
+        }
 
         fun saveKnownKeys() {
             synchronized(saveLock) {
@@ -155,6 +183,8 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
 
                         activeBytes[item.selectionKey] = 0L
                         try {
+                            publishProgress(item.name, "uploading")
+
                             val result = drive.upload(
                                 item,
                                 knownBackedUpKeys,
@@ -163,19 +193,9 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                                     activeBytes[item.selectionKey] = current
 
                                     if (fraction >= 1.0 || current >= 256L * 1024L) {
-                                        setProgressAsync(
-                                            workDataOf(
-                                                "completed" to completed.get(),
-                                                "completedBytes" to (completedBytes.get() + activeBytes.values.sum()),
-                                                "totalBytes" to totalBytes,
-                                                "uploaded" to uploaded.get(),
-                                                "already" to alreadyBackedUp.get(),
-                                                "failed" to failed.get(),
-                                                "total" to items.size,
-                                                "name" to item.name,
-                                                "phase" to "uploading"
-                                            )
-                                        )
+                                        kotlinx.coroutines.runBlocking {
+                                            publishProgress(item.name, "uploading")
+                                        }
                                     }
                                 },
                                 prefs.driveDestinationId,
@@ -204,18 +224,9 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                                 saveKnownKeys()
                             }
 
-                            setProgressAsync(
-                                workDataOf(
-                                    "completed" to done,
-                                    "completedBytes" to (completedBytes.get() + activeBytes.values.sum()),
-                                    "totalBytes" to totalBytes,
-                                    "uploaded" to uploaded.get(),
-                                    "already" to alreadyBackedUp.get(),
-                                    "failed" to failed.get(),
-                                    "total" to items.size,
-                                    "name" to item.name,
-                                    "phase" to if (done == items.size) "complete" else "uploaded"
-                                )
+                            publishProgress(
+                                item.name,
+                                if (done == items.size) "complete" else "uploaded"
                             )
 
                             FileOutcome.SUCCESS
@@ -224,19 +235,10 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                             failed.incrementAndGet()
                             val done = completed.incrementAndGet()
 
-                            setProgressAsync(
-                                workDataOf(
-                                    "completed" to done,
-                                    "completedBytes" to completedBytes.get(),
-                                    "totalBytes" to totalBytes,
-                                    "uploaded" to uploaded.get(),
-                                    "already" to alreadyBackedUp.get(),
-                                    "failed" to failed.get(),
-                                    "total" to items.size,
-                                    "name" to item.name,
-                                    "phase" to "failed",
-                                    "error" to (e.message ?: e.javaClass.simpleName)
-                                )
+                            publishProgress(
+                                item.name,
+                                "failed",
+                                completedBytes.get()
                             )
 
                             if (e is IOException) {
