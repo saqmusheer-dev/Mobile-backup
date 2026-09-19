@@ -301,7 +301,6 @@ private fun GalleryTile(
                         Text(if (selected) "✓" else "+", color = Color.White)
                     }
                 }
-            }
 
             if (backedUp) {
                 Surface(
