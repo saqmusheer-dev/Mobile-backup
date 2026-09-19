@@ -14,7 +14,6 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -264,6 +263,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 _state.value = _state.value.copy(message = "Checking Google Drive backup status...")
                 try {
                     val backedUp = DriveBackup(getApplication()).findBackedUpKeys()
+                    selectionStore.saveBackedUp(backedUp)
                     _state.value = _state.value.copy(
                         backedUpKeys = backedUp,
                         message = "Scan complete. Green checks are already backed up."
@@ -753,14 +753,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
             .build()
 
-        val selectedKnownBackedUp = _state.value.selectedKeys
-            .filter { _state.value.backedUpKeys.contains(it) }
-            .toTypedArray()
-
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
-            .setInputData(workDataOf(
-                "knownBackedUpKeys" to selectedKnownBackedUp
-            ))
             .setConstraints(constraints)
             .setBackoffCriteria(
                 androidx.work.BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS
