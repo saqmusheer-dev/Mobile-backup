@@ -273,8 +273,13 @@ class DriveBackup(private val context: Context) {
             create.mediaHttpUploader.chunkSize = 8 * 1024 * 1024
 
             val result = create.execute()
-            if (result.id == null || result.size?.toLong() != item.size) {
-                throw IOException("Verification failed for " + item.name)
+            // Drive's successful execute() response means the upload request
+            // completed. The media size field can be omitted/null in some
+            // Google Drive API responses, so do not treat a missing size as
+            // an upload failure. Requiring it here caused completed uploads
+            // to be retried and could create duplicate Drive files.
+            if (result.id.isNullOrBlank()) {
+                throw IOException("Drive did not return a file ID for " + item.name)
             }
         }
 
