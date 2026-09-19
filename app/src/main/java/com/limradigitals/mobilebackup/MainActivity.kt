@@ -413,12 +413,12 @@ private fun BackupScreenContent(
                                 onClick = { saveZip(state.lastZipUri) },
                                 modifier = Modifier.weight(1f)
                             ) { Text("Save Locally") }
-                            Button(
-                                onClick = vm::uploadZipToDrive,
-                                enabled = state.driveConnected,
-                                modifier = Modifier.fillMaxWidth()
-                            ) { Text("Upload to Drive") }
                         }
+                        Button(
+                            onClick = vm::uploadZipToDrive,
+                            enabled = state.driveConnected,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Upload to Drive") }
                     }
                 }
             }
