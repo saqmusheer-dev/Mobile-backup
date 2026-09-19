@@ -4,6 +4,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
@@ -38,6 +40,21 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         setForeground(createForegroundInfo("Starting upload…", 0, 0))
 
         val prefs = BackupPrefs(applicationContext)
+
+        // Manual backups intentionally do not use a WorkManager network
+        // constraint. Check the active network here so a connected Wi-Fi or
+        // mobile-data connection starts the upload immediately.
+        val connectivity = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE)
+            as ConnectivityManager
+        val network = connectivity.activeNetwork
+        val capabilities = network?.let { connectivity.getNetworkCapabilities(it) }
+        val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+
+        if (!hasInternet) {
+            saveStatus("Waiting for an internet connection...")
+            return Result.retry()
+        }
 
         val account = GoogleSignIn.getLastSignedInAccount(applicationContext)
         if (account == null || !GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))) {
