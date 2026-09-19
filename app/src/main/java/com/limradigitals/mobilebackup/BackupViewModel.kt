@@ -522,7 +522,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 _state.value = _state.value.copy(message = "Moving files into $folder...")
                 val result = LocalOrganizer.moveToFolder(getApplication(), items, folder)
-                val message = if (result.copiedOnly == 0) {
+                val message = if (result.failed == 0) {
                     "${result.moved} files moved to Download/Mobile Backup/$folder."
                 } else {
                     "${result.moved} moved, ${result.copiedOnly} copied only because Android did not allow deleting the original."
