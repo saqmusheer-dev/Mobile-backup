@@ -196,7 +196,8 @@ private fun BackupApp(
     vm: BackupViewModel,
     driveLauncher: ActivityResultLauncher<Intent>,
     shareZip: (Uri) -> Unit,
-    requestMove: (String) -> Unit
+    requestMove: (String) -> Unit,
+    requestDelete: () -> Unit
 ) {
     val state by vm.state.collectAsState()
     var screen by remember { mutableStateOf("Backup") }
@@ -239,7 +240,7 @@ private fun BackupApp(
             "Organize" -> OrganizeScreen(state, vm, requestMove, Modifier.padding(pad))
             "Accounts" -> AccountsScreen(state, vm, driveLauncher, Modifier.padding(pad))
             "Settings" -> SettingsScreen(state, vm, Modifier.padding(pad))
-            else -> BackupScreenContent(state, vm, shareZip, Modifier.padding(pad))
+            else -> BackupScreenContent(state, vm, shareZip, requestDelete, Modifier.padding(pad))
         }
     }
 
@@ -487,9 +488,11 @@ private fun BackupScreenContent(
     state: BackupUiState,
     vm: BackupViewModel,
     shareZip: (Uri) -> Unit,
+    requestDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showDrivePicker by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -528,6 +531,13 @@ private fun BackupScreenContent(
 
         if (state.scannedItems.isNotEmpty()) {
             item { FileSelectionCard(state, vm) }
+            item {
+                OutlinedButton(
+                    onClick = { showDeleteConfirm = true },
+                    enabled = state.selectedKeys.isNotEmpty() && !state.backupRunning,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Delete Selected Files") }
+            }
         }
 
         if (state.backupTotal > 0) {
@@ -628,6 +638,32 @@ private fun BackupScreenContent(
 
     if (showDrivePicker) {
         DriveFolderPickerDialog(state, vm) { showDrivePicker = false }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete selected files?") },
+            text = {
+                Text(
+                    "This will permanently delete " +
+                        state.selectedKeys.size +
+                        " selected file" +
+                        if (state.selectedKeys.size == 1) "." else "s."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        requestDelete()
+                    }
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
