@@ -5,9 +5,16 @@ import android.content.Context
 class LocalFolderStore(context: Context) {
     private val prefs = context.getSharedPreferences("local_folders", Context.MODE_PRIVATE)
     private val key = "folders"
+    private val defaults = listOf("Family", "Personal", "Business", "Freelance")
 
-    fun list(): List<String> =
-        prefs.getStringSet(key, emptySet()).orEmpty().toList().sorted()
+    fun list(): List<String> {
+        val existing = prefs.getStringSet(key, null)
+        if (existing == null) {
+            prefs.edit().putStringSet(key, defaults.toSet()).apply()
+            return defaults
+        }
+        return existing.toList().sorted()
+    }
 
     fun add(name: String): Boolean {
         val clean = name.trim().replace(Regex("""[/\\:*?"<>|]"""), "_")

@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.graphics.Bitmap
+import android.media.MediaPlayer
 import android.util.Size
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -49,14 +50,6 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { }
 
-    private val saveZipLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            result.data?.data?.let { vm.saveZipTo(it) }
-        }
-    }
-
     private val driveLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -91,7 +84,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                BackupApp(vm, driveLauncher, ::shareZip, ::saveZip)
+                BackupApp(vm, driveLauncher, ::shareZip)
             }
         }
     }
@@ -118,15 +111,6 @@ class MainActivity : ComponentActivity() {
         if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
     }
 
-    private fun saveZip(uri: Uri) {
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            type = "application/zip"
-            putExtra(Intent.EXTRA_TITLE, "MobileBackup_" + System.currentTimeMillis() + ".zip")
-            addCategory(Intent.CATEGORY_OPENABLE)
-        }
-        saveZipLauncher.launch(intent)
-    }
-
     private fun shareZip(uri: Uri) {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "application/zip"
@@ -142,8 +126,7 @@ class MainActivity : ComponentActivity() {
 private fun BackupApp(
     vm: BackupViewModel,
     driveLauncher: ActivityResultLauncher<Intent>,
-    shareZip: (Uri) -> Unit,
-    saveZip: (Uri) -> Unit
+    shareZip: (Uri) -> Unit
 ) {
     val state by vm.state.collectAsState()
     var screen by remember { mutableStateOf("Backup") }
@@ -186,7 +169,7 @@ private fun BackupApp(
             "Organize" -> OrganizeScreen(state, vm, Modifier.padding(pad))
             "Accounts" -> AccountsScreen(state, vm, driveLauncher, Modifier.padding(pad))
             "Settings" -> SettingsScreen(state, vm, Modifier.padding(pad))
-            else -> BackupScreenContent(state, vm, shareZip, saveZip, Modifier.padding(pad))
+            else -> BackupScreenContent(state, vm, shareZip, Modifier.padding(pad))
         }
     }
 
@@ -328,7 +311,6 @@ private fun BackupScreenContent(
     state: BackupUiState,
     vm: BackupViewModel,
     shareZip: (Uri) -> Unit,
-    saveZip: (Uri) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -413,16 +395,12 @@ private fun BackupScreenContent(
                                 onClick = { shareZip(state.lastZipUri) },
                                 modifier = Modifier.weight(1f)
                             ) { Text("Share / Email") }
-                            OutlinedButton(
-                                onClick = { saveZip(state.lastZipUri) },
+                            Button(
+                                onClick = vm::uploadZipToDrive,
+                                enabled = state.driveConnected,
                                 modifier = Modifier.weight(1f)
-                            ) { Text("Save Locally") }
+                            ) { Text("Upload to Drive") }
                         }
-                        Button(
-                            onClick = vm::uploadZipToDrive,
-                            enabled = state.driveConnected,
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("Upload to Drive") }
                     }
                 }
             }
@@ -445,10 +423,102 @@ private fun BackupScreenContent(
     }
 }
 
+private class AudioPreviewController {
+    private var player: MediaPlayer? = null
+    var playingKey by mutableStateOf<String?>(null)
+        private set
+    var loadingKey by mutableStateOf<String?>(null)
+        private set
+
+    fun toggle(context: android.content.Context, item: MediaItem) {
+        val key = item.selectionKey
+
+        if (playingKey == key) {
+            val current = player
+            if (current?.isPlaying == true) {
+                current.pause()
+                playingKey = null
+            } else {
+                current?.start()
+                playingKey = key
+            }
+            return
+        }
+
+        release()
+        loadingKey = key
+
+        try {
+            val next = MediaPlayer()
+            player = next
+            next.setOnPreparedListener {
+                if (loadingKey == key && player === next) {
+                    loadingKey = null
+                    playingKey = key
+                    next.start()
+                } else {
+                    next.release()
+                }
+            }
+            next.setOnCompletionListener {
+                if (player === next) release()
+            }
+            next.setOnErrorListener { _, _, _ ->
+                if (player === next) release()
+                true
+            }
+            next.setDataSource(context, item.uri)
+            next.prepareAsync()
+        } catch (_: Exception) {
+            release()
+        }
+    }
+
+    fun release() {
+        try {
+            player?.release()
+        } catch (_: Exception) {
+        }
+        player = null
+        playingKey = null
+        loadingKey = null
+    }
+}
+
+@Composable
+private fun AudioPreviewButton(
+    item: MediaItem,
+    controller: AudioPreviewController,
+    context: android.content.Context
+) {
+    val playing = controller.playingKey == item.selectionKey
+    val loading = controller.loadingKey == item.selectionKey
+
+    IconButton(
+        onClick = { controller.toggle(context, item) },
+        enabled = !loading
+    ) {
+        Text(
+            when {
+                loading -> "…"
+                playing -> "❚❚"
+                else -> "▶"
+            },
+            style = MaterialTheme.typography.titleMedium
+        )
+    }
+}
+
 @Composable
 private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
     var filter by remember { mutableStateOf("All") }
     var sort by remember { mutableStateOf("Newest") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val audioController = remember { AudioPreviewController() }
+
+    DisposableEffect(Unit) {
+        onDispose { audioController.release() }
+    }
 
     val filtered = remember(state.scannedItems, filter, sort) {
         when (filter) {
@@ -549,6 +619,9 @@ private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
                                 item.category + " • " + formatBytes(item.size) + " • " + formatDate(item.modifiedSeconds),
                                 style = MaterialTheme.typography.bodySmall
                             )
+                        }
+                        if (item.mimeType.startsWith("audio/") || item.category.endsWith("/Audio")) {
+                            AudioPreviewButton(item, audioController, context)
                         }
                         if (backedUp) {
                             Text(
@@ -702,7 +775,7 @@ private fun OrganizeScreen(
 
         item {
             Text(
-                "Files are copied first and the original is deleted only after a successful copy. If Android blocks deletion, the original remains.",
+                "Files are moved directly into the selected folder. Android may ask for permission when moving media created by another app.",
                 style = MaterialTheme.typography.bodySmall
             )
         }
