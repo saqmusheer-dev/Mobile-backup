@@ -58,8 +58,8 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         }
 
         val drive = DriveBackup(applicationContext)
-        val knownBackedUpKeys: Set<String> =
-            inputData.getStringArray("knownBackedUpKeys")?.toSet().orEmpty()
+        val selectionStore = SelectionStore(applicationContext)
+        val knownBackedUpKeys = selectionStore.loadBackedUp().toMutableSet()
         // Reuse the backup status already discovered by the app scan. This avoids
         // another Drive search immediately before the actual upload.
         var uploaded = 0
@@ -129,8 +129,14 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                 }, prefs.driveDestinationId)) {
                     UploadResult.UPLOADED -> {
                         uploaded++
+                        knownBackedUpKeys.add(drive.backupKey(item))
+                        selectionStore.saveBackedUp(knownBackedUpKeys)
                     }
-                    UploadResult.ALREADY_BACKED_UP -> alreadyBackedUp++
+                    UploadResult.ALREADY_BACKED_UP -> {
+                        alreadyBackedUp++
+                        knownBackedUpKeys.add(drive.backupKey(item))
+                        selectionStore.saveBackedUp(knownBackedUpKeys)
+                    }
                 }
                 completed++
                 completedBytes += item.size
