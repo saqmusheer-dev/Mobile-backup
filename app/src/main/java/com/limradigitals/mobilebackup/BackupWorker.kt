@@ -131,10 +131,10 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                             "phase" to "uploading"
                         ))
                     }
-                })) {
+                }) {
                     UploadResult.UPLOADED -> {
                         uploaded++
-                     }
+                    }
                     UploadResult.ALREADY_BACKED_UP -> alreadyBackedUp++
                 }
                 completed++
