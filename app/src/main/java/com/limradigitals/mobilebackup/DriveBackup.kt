@@ -212,11 +212,25 @@ class DriveBackup(private val context: Context) {
             .isNullOrEmpty()
     }
 
+    /**
+     * Resolves the final Drive parent once, before a batch starts uploading.
+     * This is deliberately separate from upload() so concurrent uploads never
+     * race to discover/create the same category folders.
+     */
+    fun resolveUploadParent(item: MediaItem, destinationParentId: String? = null): String {
+        val explicit = destinationParentId?.takeIf { it.isNotBlank() }
+        if (explicit != null) return explicit
+
+        val root = folder(drive(), ROOT, "root")
+        return categoryFolder(drive(), item.category, root)
+    }
+
     fun upload(
         item: MediaItem,
         knownBackedUpKeys: Set<String>? = null,
         onProgress: ((Double) -> Unit)? = null,
-        destinationParentId: String? = null
+        destinationParentId: String? = null,
+        resolvedParentId: String? = null
     ): UploadResult {
         val d = drive()
         val key = sourceKey(item)
@@ -224,10 +238,9 @@ class DriveBackup(private val context: Context) {
         if (knownBackedUpKeys?.contains(key) == true) return UploadResult.ALREADY_BACKED_UP
         if (knownBackedUpKeys == null && exists(d, key)) return UploadResult.ALREADY_BACKED_UP
 
-        val root = destinationParentId?.takeIf { it.isNotBlank() } ?: folder(d, ROOT, "root")
-        // An explicitly selected Drive folder is the exact upload destination.
-        // Do not create WhatsApp/Images subfolders underneath it.
-        val parent = if (destinationParentId?.isNotBlank() == true) root else categoryFolder(d, item.category, root)
+        // Use the pre-resolved parent whenever the worker has prepared the batch.
+        // An explicitly selected Drive folder remains the exact upload destination.
+        val parent = resolvedParentId ?: resolveUploadParent(item, destinationParentId)
 
         val stream = context.contentResolver.openInputStream(item.uri)
             ?: throw IOException("Cannot read " + item.name)
