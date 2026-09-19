@@ -34,7 +34,7 @@ class DriveBackup(private val context: Context) {
 
     private val transport by lazy { GoogleNetHttpTransport.newTrustedTransport() }
     private val json = GsonFactory.getDefaultInstance()
-    private val folderCache = mutableMapOf<String, String>()
+    private val folderCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     fun account(): GoogleSignInAccount? = GoogleSignIn.getLastSignedInAccount(context)
 
@@ -43,7 +43,9 @@ class DriveBackup(private val context: Context) {
         return GoogleSignIn.hasPermissions(a, Scope(DriveScopes.DRIVE_FILE))
     }
 
-    private fun drive(): Drive {
+    private val driveService: Drive by lazy { buildDrive() }
+
+    private fun buildDrive(): Drive {
         val a = account() ?: error("Connect Google Drive first")
         val credential = GoogleAccountCredential.usingOAuth2(
             context,
@@ -56,6 +58,8 @@ class DriveBackup(private val context: Context) {
             .setApplicationName("Mobile Backup")
             .build()
     }
+
+    private fun drive(): Drive = driveService
 
     private fun esc(s: String): String =
         s.replace("\\", "\\\\").replace("'", "\\'")
@@ -221,7 +225,9 @@ class DriveBackup(private val context: Context) {
         if (knownBackedUpKeys == null && exists(d, key)) return UploadResult.ALREADY_BACKED_UP
 
         val root = destinationParentId?.takeIf { it.isNotBlank() } ?: folder(d, ROOT, "root")
-        val parent = categoryFolder(d, item.category, root)
+        // An explicitly selected Drive folder is the exact upload destination.
+        // Do not create WhatsApp/Images subfolders underneath it.
+        val parent = if (destinationParentId?.isNotBlank() == true) root else categoryFolder(d, item.category, root)
 
         val stream = context.contentResolver.openInputStream(item.uri)
             ?: throw IOException("Cannot read " + item.name)
