@@ -113,6 +113,7 @@ class MainActivity : ComponentActivity() {
 
     private fun requestMove(folder: String) {
         val uris = vm.selectedMediaUris()
+        vm.beginMoveRequest()
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || uris.isEmpty()) {
             vm.moveSelectedToFolder(folder)
@@ -127,7 +128,7 @@ class MainActivity : ComponentActivity() {
             )
         } catch (_: Exception) {
             pendingMoveFolder = null
-            vm.moveSelectedToFolder(folder)
+            vm.failMoveRequest("Android could not request permission for these files.")
         }
     }
 
@@ -225,9 +226,17 @@ private fun GalleryScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var selectedFolder by remember { mutableStateOf<String?>(null) }
+    var viewMode by remember { mutableStateOf("Scanned") }
 
-    val images = remember(state.scannedItems) {
-        state.scannedItems.filter {
+    LaunchedEffect(viewMode) {
+        if (viewMode == "Local Storage" && state.localStorageItems.isEmpty()) {
+            vm.scanLocalStorage()
+        }
+    }
+
+    val sourceItems = if (viewMode == "Local Storage") state.localStorageItems else state.scannedItems
+    val images = remember(sourceItems) {
+        sourceItems.filter {
             it.mimeType.startsWith("image/") || it.category.endsWith("/Images")
         }
     }
@@ -268,7 +277,31 @@ private fun GalleryScreen(
                     }
                 }
 
-                Text("Folders", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf("Scanned", "Local Storage").forEach { option ->
+                        FilterChip(
+                            selected = viewMode == option,
+                            onClick = {
+                                viewMode = option
+                                selectedFolder = null
+                            },
+                            label = { Text(option) }
+                        )
+                    }
+                }
+
+                if (viewMode == "Local Storage" && state.localStorageScanning) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text("Scanning local storage…", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Text(
+                    if (viewMode == "Local Storage") "Local folders" else "Folders",
+                    style = MaterialTheme.typography.titleMedium
+                )
 
                 androidx.compose.foundation.lazy.LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -882,6 +915,37 @@ private fun OrganizeScreen(
                 onClick = { showNewFolder = true },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Create Folder") }
+        }
+
+        if (state.organizeRunning || state.organizeCompleted > 0 || state.message.contains("moved", ignoreCase = true)) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            if (state.organizeRunning) "Moving files" else "Move complete",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        if (state.organizeTotal > 0) {
+                            val progress = (state.organizeCompleted.toFloat() /
+                                state.organizeTotal.coerceAtLeast(1)).coerceIn(0f, 1f)
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text(
+                                state.organizeCompleted.toString() + " / " +
+                                    state.organizeTotal + " processed • " +
+                                    state.organizeMoved + " moved • " +
+                                    state.organizeFailed + " failed"
+                            )
+                        }
+                        Text(state.message)
+                    }
+                }
+            }
         }
 
         item {
