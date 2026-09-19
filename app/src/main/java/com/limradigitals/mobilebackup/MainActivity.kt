@@ -201,6 +201,7 @@ private fun BackupApp(
 ) {
     val state by vm.state.collectAsState()
     var screen by remember { mutableStateOf("Backup") }
+    var galleryFolderRequest by remember { mutableStateOf<String?>(null) }
 
     val title = when (screen) {
         "Gallery" -> "Photo Gallery"
@@ -228,16 +229,16 @@ private fun BackupApp(
                     NavigationBarItem(
                         selected = screen == name,
                         onClick = { screen = name },
-                        icon = { Text(icon, fontSize = 25.sp) },
-                        label = { Text(name) }
+                        icon = { Text(icon, fontSize = 28.sp) },
+                        label = { Text(name, fontSize = 13.sp) }
                     )
                 }
             }
         }
     ) { pad ->
         when (screen) {
-            "Gallery" -> GalleryScreen(state, vm, { screen = "Organize" }, Modifier.padding(pad))
-            "Organize" -> OrganizeScreen(state, vm, requestMove, Modifier.padding(pad))
+            "Gallery" -> GalleryScreen(state, vm, { screen = "Organize" }, galleryFolderRequest, Modifier.padding(pad))
+            "Organize" -> OrganizeScreen(state, vm, requestMove, { folder -> galleryFolderRequest = folder; screen = "Gallery" }, Modifier.padding(pad))
             "Accounts" -> AccountsScreen(state, vm, driveLauncher, Modifier.padding(pad))
             "Settings" -> SettingsScreen(state, vm, Modifier.padding(pad))
             else -> BackupScreenContent(state, vm, shareZip, requestDelete, Modifier.padding(pad))
@@ -254,11 +255,20 @@ private fun GalleryScreen(
     state: BackupUiState,
     vm: BackupViewModel,
     onOrganize: () -> Unit,
+    requestedFolder: String?,
     modifier: Modifier = Modifier
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var selectedFolder by remember { mutableStateOf<String?>(null) }
-    var viewMode by remember { mutableStateOf("Scanned") }
+    var selectedFolder by remember { mutableStateOf<String?>(requestedFolder) }
+    var viewMode by remember { mutableStateOf(if (requestedFolder != null) "Local Storage" else "Scanned") }
+
+    LaunchedEffect(requestedFolder) {
+        if (requestedFolder != null) {
+            viewMode = "Local Storage"
+            selectedFolder = requestedFolder
+            if (state.localStorageItems.isEmpty()) vm.scanLocalStorage()
+        }
+    }
 
     LaunchedEffect(viewMode) {
         if (viewMode == "Local Storage" && state.localStorageItems.isEmpty()) {
@@ -1124,6 +1134,7 @@ private fun OrganizeScreen(
     state: BackupUiState,
     vm: BackupViewModel,
     requestMove: (String) -> Unit,
+    onOpenFolder: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showNewFolder by remember { mutableStateOf(false) }
@@ -1204,10 +1215,15 @@ private fun OrganizeScreen(
             item { Text("No folders yet. Create Personal Documents, Business, Receipts, etc.") }
         } else {
             items(state.localFolders) { folder ->
-                Card(Modifier.fillMaxWidth()) {
+                Card(
+                    onClick = { onOpenFolder(folder) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     ListItem(
-                        headlineContent = { Text(folder) },
-                        supportingContent = { Text("Download/Mobile Backup/$folder") }
+                        leadingContent = { Text("📁", fontSize = 30.sp) },
+                        headlineContent = { Text(folder, style = MaterialTheme.typography.titleMedium) },
+                        supportingContent = { Text("Download/Mobile Backup/$folder") },
+                        trailingContent = { Text("›", fontSize = 28.sp) }
                     )
                 }
             }
