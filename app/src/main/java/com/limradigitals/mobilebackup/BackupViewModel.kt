@@ -14,6 +14,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -713,7 +714,14 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
             .build()
 
+        val selectedKnownBackedUp = _state.value.selectedKeys
+            .filter { _state.value.backedUpKeys.contains(it) }
+            .toTypedArray()
+
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
+            .setInputData(workDataOf(
+                "knownBackedUpKeys" to selectedKnownBackedUp
+            ))
             .setConstraints(constraints)
             .setBackoffCriteria(
                 androidx.work.BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS
