@@ -58,10 +58,10 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         }
 
         val drive = DriveBackup(applicationContext)
-        val knownBackedUpKeys = try {
+        val knownBackedUpKeys: Set<String>? = try {
             drive.findExistingKeys(items.map { drive.backupKey(it) }.toSet())
         } catch (_: Exception) {
-            emptySet()
+            null
         }
         // Check only the selected files in a small batched Drive query. This avoids
         // one network search per file while keeping duplicate detection reliable.
