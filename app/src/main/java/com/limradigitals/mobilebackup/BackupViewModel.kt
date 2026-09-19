@@ -525,7 +525,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 val message = if (result.failed == 0) {
                     "${result.moved} files moved to Download/Mobile Backup/$folder."
                 } else {
-                    "${result.moved} moved, ${result.copiedOnly} copied only because Android did not allow deleting the original."
+                    "${result.moved} moved, ${result.failed} could not be moved. Android may require permission to modify media from another app."
                 }
                 _state.value = _state.value.copy(message = message)
             } catch (e: Exception) {
