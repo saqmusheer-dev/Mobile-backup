@@ -130,12 +130,12 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                     UploadResult.UPLOADED -> {
                         uploaded++
                         knownBackedUpKeys.add(drive.backupKey(item))
-                        selectionStore.saveBackedUp(knownBackedUpKeys)
+                        if ((uploaded + alreadyBackedUp) % 10 == 0) selectionStore.saveBackedUp(knownBackedUpKeys)
                     }
                     UploadResult.ALREADY_BACKED_UP -> {
                         alreadyBackedUp++
                         knownBackedUpKeys.add(drive.backupKey(item))
-                        selectionStore.saveBackedUp(knownBackedUpKeys)
+                        if ((uploaded + alreadyBackedUp) % 10 == 0) selectionStore.saveBackedUp(knownBackedUpKeys)
                     }
                 }
                 completed++
@@ -177,12 +177,14 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                 ))
 
                 if (e is IOException) {
+                    selectionStore.saveBackedUp(knownBackedUpKeys)
                     saveStatus("Paused after " + completed + " of " + items.size + " files. Will retry.")
                     return Result.retry()
                 }
             }
         }
 
+        selectionStore.saveBackedUp(knownBackedUpKeys)
         val message = "Backup complete: " + uploaded + " uploaded, " +
             alreadyBackedUp + " already backed up, " + failed + " failed."
         saveStatus(message)
