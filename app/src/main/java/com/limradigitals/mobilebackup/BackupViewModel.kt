@@ -755,6 +755,12 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
             .setConstraints(constraints)
+            // Manual backup is a user-initiated transfer. Ask WorkManager to
+            // start it with the lowest practical latency while still falling
+            // back safely if expedited quota is unavailable.
+            .setExpedited(
+                androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST
+            )
             .setBackoffCriteria(
                 androidx.work.BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS
             )
