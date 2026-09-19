@@ -308,6 +308,7 @@ private fun GalleryScreen(
     val selectedImages = state.selectedKeys.count { key ->
         images.any { it.selectionKey == key }
     }
+    var viewerIndex by remember { mutableStateOf<Int?>(null) }
 
     Column(
         modifier = modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -395,11 +396,23 @@ private fun GalleryScreen(
                         state.selectedKeys.contains(item.selectionKey),
                         state.backedUpKeys.contains(item.selectionKey),
                         onSelect = { vm.toggleFile(item) },
-                        onOpen = { openImage(context, item.uri, item.mimeType) }
+                        onOpen = {
+                            viewerIndex = visibleImages.indexOfFirst {
+                                it.selectionKey == item.selectionKey
+                            }.takeIf { it >= 0 }
+                        }
                     )
                 }
             }
         }
+    }
+
+    viewerIndex?.let { startIndex ->
+        ImageViewerDialog(
+            images = visibleImages,
+            startIndex = startIndex,
+            onDismiss = { viewerIndex = null }
+        )
     }
 }
 
@@ -926,6 +939,7 @@ private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
     var sort by remember { mutableStateOf("Newest") }
     val context = androidx.compose.ui.platform.LocalContext.current
     val audioController = remember { AudioPreviewController() }
+    var videoPreviewItem by remember { mutableStateOf<MediaItem?>(null) }
 
     DisposableEffect(Unit) {
         onDispose { audioController.release() }
@@ -1034,6 +1048,9 @@ private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
                         if (item.mimeType.startsWith("audio/") || item.category.endsWith("/Audio")) {
                             AudioPreviewButton(item, audioController, context)
                         }
+                        if (item.mimeType.startsWith("video/") || item.category.endsWith("/Videos")) {
+                            VideoPreviewButton(item) { videoPreviewItem = item }
+                        }
                         if (backedUp) {
                             Text(
                                 "✓",
@@ -1055,6 +1072,13 @@ private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
                 }
             }
         }
+    }
+
+    videoPreviewItem?.let { item ->
+        VideoPreviewDialog(
+            item = item,
+            onDismiss = { videoPreviewItem = null }
+        )
     }
 }
 
@@ -1245,18 +1269,43 @@ private fun OrganizeScreen(
             }
         }
 
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                ListItem(
+                    leadingContent = { Text("🗂️", fontSize = 32.sp) },
+                    headlineContent = {
+                        Text("Mobile Backup", style = MaterialTheme.typography.titleMedium)
+                    },
+                    supportingContent = { Text("Download/Mobile Backup") },
+                    trailingContent = {
+                        Text(
+                            state.localFolders.size.toString() + " folders",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                )
+            }
+        }
+
         if (state.localFolders.isEmpty()) {
-            item { Text("No folders yet. Create Personal Documents, Business, Receipts, etc.") }
+            item {
+                Text("No folders yet. Create Personal, Business, Receipts, etc.")
+            }
         } else {
             items(state.localFolders) { folder ->
                 Card(
                     onClick = { onOpenFolder(folder) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp)
                 ) {
                     ListItem(
                         leadingContent = { Text("📁", fontSize = 30.sp) },
                         headlineContent = { Text(folder, style = MaterialTheme.typography.titleMedium) },
-                        supportingContent = { Text("Download/Mobile Backup/$folder") },
+                        supportingContent = { Text("Mobile Backup/$folder") },
                         trailingContent = { Text("›", fontSize = 28.sp) }
                     )
                 }
