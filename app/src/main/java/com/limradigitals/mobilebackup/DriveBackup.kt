@@ -265,10 +265,9 @@ class DriveBackup(private val context: Context) {
                     }
                 )
             }
-            // Phone backup files are commonly already-compressed binary data.
-            // Avoid gzip buffering/CPU overhead for the upload body.
-            create.mediaHttpUploader.setDisableGZipContent(true)
-
+            // Keep the Google client's normal HTTP content handling here.
+            // This is the known-good upload path; do not add custom transfer
+            // encoding/compression behavior to the media request.
             // Small files use one direct request; larger files use large
             // resumable chunks for reliability without tiny request overhead.
             create.mediaHttpUploader.isDirectUploadEnabled =
