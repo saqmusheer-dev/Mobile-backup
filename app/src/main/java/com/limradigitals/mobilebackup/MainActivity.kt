@@ -186,7 +186,7 @@ private fun BackupApp(
             "Organize" -> OrganizeScreen(state, vm, Modifier.padding(pad))
             "Accounts" -> AccountsScreen(state, vm, driveLauncher, Modifier.padding(pad))
             "Settings" -> SettingsScreen(state, vm, Modifier.padding(pad))
-            else -> BackupScreenContent(state, vm, shareZip, Modifier.padding(pad))
+            else -> BackupScreenContent(state, vm, shareZip, saveZip, Modifier.padding(pad))
         }
     }
 
@@ -328,6 +328,7 @@ private fun BackupScreenContent(
     state: BackupUiState,
     vm: BackupViewModel,
     shareZip: (Uri) -> Unit,
+    saveZip: (Uri) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
