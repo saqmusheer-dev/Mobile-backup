@@ -3,8 +3,6 @@ package com.limradigitals.mobilebackup
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -30,11 +28,6 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         setForeground(createForegroundInfo("Preparing backup…", 0, 0))
 
         val prefs = BackupPrefs(applicationContext)
-        if (prefs.wifiOnly && !isWifiConnected()) {
-            val message = "Waiting for Wi-Fi connection..."
-            saveStatus(message)
-            return Result.retry()
-        }
 
         val account = GoogleSignIn.getLastSignedInAccount(applicationContext)
         if (account == null || !GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))) {
@@ -65,8 +58,13 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         }
 
         val drive = DriveBackup(applicationContext)
-        // Check only the files selected for this backup. Scanning every Drive file
-        // before each backup can be very slow on accounts with thousands of files.
+        val knownBackedUpKeys = try {
+            drive.findExistingKeys(items.map { drive.backupKey(it) }.toSet())
+        } catch (_: Exception) {
+            emptySet()
+        }
+        // Check only the selected files in a small batched Drive query. This avoids
+        // one network search per file while keeping duplicate detection reliable.
         var uploaded = 0
         var alreadyBackedUp = 0
         var failed = 0
@@ -112,7 +110,7 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
 
             try {
                 var lastReportedBytes = completedBytes
-                when (drive.upload(item, null) { currentFraction ->
+                when (drive.upload(item, knownBackedUpKeys) { currentFraction ->
                     val currentBytes = (item.size * currentFraction.coerceIn(0.0, 1.0)).toLong()
                     val overallBytes = completedBytes + currentBytes
                     if (overallBytes - lastReportedBytes >= 256L * 1024L ||
@@ -236,12 +234,6 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         )
     }
 
-    private fun isWifiConnected(): Boolean {
-        val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(network) ?: return false
-        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-    }
 
     private fun saveStatus(message: String) {
         applicationContext.getSharedPreferences("backup_status", Context.MODE_PRIVATE)
