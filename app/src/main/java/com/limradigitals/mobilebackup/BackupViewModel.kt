@@ -747,14 +747,10 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun enqueueBackup() {
-        // Manual backup should use either Wi-Fi or mobile data.
-        // Wi-Fi Only remains available for automatic scheduled backups.
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
-            .build()
-
+        // Manual backup is user-initiated. Do not make WorkManager wait for
+        // its network constraint validator; BackupWorker checks the active
+        // network immediately and retries only when there is no connection.
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
-            .setConstraints(constraints)
             // Manual backup is a user-initiated transfer. Ask WorkManager to
             // start it with the lowest practical latency while still falling
             // back safely if expedited quota is unavailable.
