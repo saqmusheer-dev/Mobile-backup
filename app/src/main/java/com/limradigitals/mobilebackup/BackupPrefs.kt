@@ -35,5 +35,37 @@ class BackupPrefs(context: Context) {
         get() = p.getString("driveDestinationName", "Mobile Backup (default)") ?: "Mobile Backup (default)"
         set(v) = p.edit().putString("driveDestinationName", v).apply()
 
+    var lastBackupCompleted: Int
+        get() = p.getInt("lastBackupCompleted", 0)
+        set(v) = p.edit().putInt("lastBackupCompleted", v).apply()
+
+    var lastBackupTotal: Int
+        get() = p.getInt("lastBackupTotal", 0)
+        set(v) = p.edit().putInt("lastBackupTotal", v).apply()
+
+    var lastBackupUploaded: Int
+        get() = p.getInt("lastBackupUploaded", 0)
+        set(v) = p.edit().putInt("lastBackupUploaded", v).apply()
+
+    var lastBackupAlready: Int
+        get() = p.getInt("lastBackupAlready", 0)
+        set(v) = p.edit().putInt("lastBackupAlready", v).apply()
+
+    var lastBackupFailed: Int
+        get() = p.getInt("lastBackupFailed", 0)
+        set(v) = p.edit().putInt("lastBackupFailed", v).apply()
+
+    var lastBackupBytesCompleted: Long
+        get() = p.getLong("lastBackupBytesCompleted", 0L)
+        set(v) = p.edit().putLong("lastBackupBytesCompleted", v).apply()
+
+    var lastBackupBytesTotal: Long
+        get() = p.getLong("lastBackupBytesTotal", 0L)
+        set(v) = p.edit().putLong("lastBackupBytesTotal", v).apply()
+
+    var lastBackupMessage: String
+        get() = p.getString("lastBackupMessage", "No backup completed yet.") ?: "No backup completed yet."
+        set(v) = p.edit().putString("lastBackupMessage", v).apply()
+
     fun networkType(): NetworkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
 }
