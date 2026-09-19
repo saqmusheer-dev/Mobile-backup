@@ -22,6 +22,8 @@ enum class UploadResult {
     ALREADY_BACKED_UP
 }
 
+data class DriveFolder(val id: String, val name: String)
+
 class DriveBackup(private val context: Context) {
     companion object {
         private const val ROOT = "Mobile Backup"
@@ -96,6 +98,80 @@ class DriveBackup(private val context: Context) {
 
     fun backupKey(item: MediaItem): String = sourceKey(item)
 
+    fun listFolders(parentId: String = "root"): List<DriveFolder> {
+        if (!isConnected()) return emptyList()
+        val d = drive()
+        val folders = mutableListOf<DriveFolder>()
+        var token: String? = null
+        do {
+            val page = d.files().list()
+                .setQ("'" + parentId + "' in parents and mimeType = '" + FOLDER + "' and trashed = false")
+                .setSpaces("drive")
+                .setPageSize(1000)
+                .setOrderBy("name_natural")
+                .setFields("nextPageToken,files(id,name)")
+                .setPageToken(token)
+                .execute()
+            page.files.orEmpty().forEach { file ->
+                if (!file.id.isNullOrBlank() && !file.name.isNullOrBlank()) {
+                    folders.add(DriveFolder(file.id, file.name))
+                }
+            }
+            token = page.nextPageToken
+        } while (!token.isNullOrBlank())
+        return folders
+    }
+
+    fun createDriveFolder(name: String, parentId: String = "root"): DriveFolder {
+        val clean = name.trim()
+        if (clean.isBlank()) throw IOException("Enter a folder name.")
+        val d = drive()
+        val q = "'" + parentId + "' in parents and name = '" + esc(clean) +
+            "' and mimeType = '" + FOLDER + "' and trashed = false"
+        val existing = d.files().list()
+            .setQ(q)
+            .setSpaces("drive")
+            .setPageSize(1)
+            .setFields("files(id,name)")
+            .execute()
+            .files
+            .orEmpty()
+            .firstOrNull()
+        if (existing?.id != null) return DriveFolder(existing.id, existing.name ?: clean)
+        val created = d.files().create(File().apply {
+            this.name = clean
+            mimeType = FOLDER
+            parents = listOf(parentId)
+        }).setFields("id,name").execute()
+        return DriveFolder(created.id, created.name ?: clean)
+    }
+
+    fun findExistingKeys(keys: Set<String>): Set<String> {
+        if (!isConnected() || keys.isEmpty()) return emptySet()
+        val d = drive()
+        val result = mutableSetOf<String>()
+        keys.toList().chunked(40).forEach { batch ->
+            val terms = batch.joinToString(" or ") { key ->
+                "appProperties has { key='" + KEY + "' and value='" + esc(key) + "' }"
+            }
+            var token: String? = null
+            do {
+                val page = d.files().list()
+                    .setQ("(" + terms + ") and trashed = false")
+                    .setSpaces("drive")
+                    .setPageSize(1000)
+                    .setFields("nextPageToken,files(appProperties)")
+                    .setPageToken(token)
+                    .execute()
+                page.files.orEmpty().forEach { file ->
+                    file.appProperties?.get(KEY)?.let { result.add(it) }
+                }
+                token = page.nextPageToken
+            } while (!token.isNullOrBlank())
+        }
+        return result
+    }
+
     fun findBackedUpKeys(): Set<String> {
         if (!isConnected()) return emptySet()
         val d = drive()
@@ -135,7 +211,8 @@ class DriveBackup(private val context: Context) {
     fun upload(
         item: MediaItem,
         knownBackedUpKeys: Set<String>? = null,
-        onProgress: ((Double) -> Unit)? = null
+        onProgress: ((Double) -> Unit)? = null,
+        destinationParentId: String? = null
     ): UploadResult {
         val d = drive()
         val key = sourceKey(item)
@@ -143,7 +220,7 @@ class DriveBackup(private val context: Context) {
         if (knownBackedUpKeys?.contains(key) == true) return UploadResult.ALREADY_BACKED_UP
         if (knownBackedUpKeys == null && exists(d, key)) return UploadResult.ALREADY_BACKED_UP
 
-        val root = folder(d, ROOT, "root")
+        val root = destinationParentId?.takeIf { it.isNotBlank() } ?: folder(d, ROOT, "root")
         val parent = categoryFolder(d, item.category, root)
 
         val stream = context.contentResolver.openInputStream(item.uri)
