@@ -56,7 +56,13 @@ data class BackupUiState(
     val backupBytesTotal: Long = 0L,
     val lastZipUri: Uri? = null,
     val localFolders: List<String> = emptyList(),
-    val organizeRunning: Boolean = false
+    val organizeRunning: Boolean = false,
+    val organizeTotal: Int = 0,
+    val organizeCompleted: Int = 0,
+    val organizeMoved: Int = 0,
+    val organizeFailed: Int = 0,
+    val localStorageItems: List<MediaItem> = emptyList(),
+    val localStorageScanning: Boolean = false
 )
 
 class BackupViewModel(app: Application) : AndroidViewModel(app) {
@@ -516,20 +522,95 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun beginMoveRequest() {
+        if (_state.value.selectedKeys.isEmpty()) {
+            _state.value = _state.value.copy(message = "Select files before organizing.")
+            return
+        }
+        val total = _state.value.selectedKeys.size
+        _state.value = _state.value.copy(
+            organizeRunning = true,
+            organizeTotal = total,
+            organizeCompleted = 0,
+            organizeMoved = 0,
+            organizeFailed = 0,
+            message = "Requesting Android permission to move " + total + " file" +
+                if (total == 1) "..." else "s..."
+        )
+    }
+
+    fun failMoveRequest(message: String) {
+        _state.value = _state.value.copy(
+            organizeRunning = false,
+            message = message
+        )
+    }
+
     fun selectedMediaUris(): List<Uri> = _state.value.scannedItems
         .filter { _state.value.selectedKeys.contains(it.selectionKey) }
         .filter { it.mimeType.startsWith("image/") || it.mimeType.startsWith("video/") || it.mimeType.startsWith("audio/") }
         .map { it.uri }
 
     fun cancelMoveRequest() {
-        _state.value = _state.value.copy(organizeRunning = false)
+        _state.value = _state.value.copy(
+            organizeRunning = false,
+            message = "Move cancelled. Android permission was not granted."
+        )
     }
 
     fun addLocalFolder(name: String) {
-        if (folderStore.add(name)) {
-            _state.value = _state.value.copy(localFolders = folderStore.list())
-        } else {
+        val clean = name.trim().replace(Regex("""[/\\:*?"<>|]"""), "_").trim()
+        if (clean.isBlank()) {
             _state.value = _state.value.copy(message = "Enter a new folder name.")
+            return
+        }
+        if (!folderStore.add(clean)) {
+            _state.value = _state.value.copy(message = "That folder already exists.")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val created = try {
+                LocalOrganizer.ensureFolder(getApplication(), clean)
+            } catch (_: Exception) {
+                false
+            }
+            _state.value = _state.value.copy(
+                localFolders = folderStore.list(),
+                message = if (created)
+                    "Folder created: Downloads/Mobile Backup/" + clean
+                else
+                    "Folder saved, but Android did not allow creating the physical folder yet."
+            )
+        }
+    }
+
+    fun scanLocalStorage() {
+        if (_state.value.localStorageScanning) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _state.value = _state.value.copy(localStorageScanning = true)
+            try {
+                val items = MediaScanner(getApplication()).scan(
+                    phoneImages = true,
+                    phoneVideos = true,
+                    phoneAudio = true,
+                    phoneDocuments = true,
+                    whatsappImages = true,
+                    whatsappVideos = true,
+                    whatsappAudio = true,
+                    whatsappDocuments = true,
+                    downloads = true
+                )
+                _state.value = _state.value.copy(
+                    localStorageItems = items,
+                    localStorageScanning = false,
+                    message = "Local storage scan complete: " + items.size + " files found."
+                )
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    localStorageScanning = false,
+                    message = "Local storage scan failed: " + (e.message ?: e.javaClass.simpleName)
+                )
+            }
         }
     }
 
@@ -546,9 +627,25 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 _state.value = _state.value.copy(
                     organizeRunning = true,
-                    message = "Moving files into $folder..."
+                    organizeTotal = items.size,
+                    organizeCompleted = 0,
+                    organizeMoved = 0,
+                    organizeFailed = 0,
+                    message = "Moving files into " + folder + "..."
                 )
-                val result = LocalOrganizer.moveToFolder(getApplication(), items, folder)
+                LocalOrganizer.ensureFolder(getApplication(), folder)
+                val result = LocalOrganizer.moveToFolder(
+                    getApplication(),
+                    items,
+                    folder
+                ) { completed, moved, failed ->
+                    _state.value = _state.value.copy(
+                        organizeCompleted = completed,
+                        organizeMoved = moved,
+                        organizeFailed = failed,
+                        message = "Moving " + completed + " of " + items.size + " files into " + folder + "..."
+                    )
+                }
                 val message = if (result.failed == 0) {
                     "${result.moved} files moved to Download/Mobile Backup/$folder."
                 } else {
@@ -568,12 +665,18 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                         selectedKeys = emptySet(),
                         selectedBytes = 0L,
                         pending = 0,
-                        organizeRunning = false
+                        organizeRunning = false,
+                        organizeCompleted = items.size,
+                        organizeMoved = result.moved,
+                        organizeFailed = result.failed
                     )
                 } else {
                     _state.value = _state.value.copy(
                         message = message,
-                        organizeRunning = false
+                        organizeRunning = false,
+                        organizeCompleted = items.size,
+                        organizeMoved = result.moved,
+                        organizeFailed = result.failed
                     )
                 }
             } catch (e: Exception) {
