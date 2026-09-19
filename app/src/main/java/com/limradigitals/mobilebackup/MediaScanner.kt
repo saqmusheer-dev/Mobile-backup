@@ -144,7 +144,8 @@ class MediaScanner(private val context: Context) {
                     mimeType,
                     cursor.getLong(size),
                     cursor.getLong(modified),
-                    category
+                    category,
+                    relativePath
                 ))
             }
         }
@@ -179,7 +180,8 @@ class MediaScanner(private val context: Context) {
                     cursor.getString(mime) ?: "application/octet-stream",
                     cursor.getLong(size),
                     cursor.getLong(modified),
-                    "Downloads"
+                    "Downloads",
+                    relativePath
                 ))
             }
         }
