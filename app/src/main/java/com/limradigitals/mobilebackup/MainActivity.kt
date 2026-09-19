@@ -516,6 +516,163 @@ private fun GalleryTile(
 }
 
 @Composable
+private fun VideoPreviewButton(
+    item: MediaItem,
+    onClick: () -> Unit
+) {
+    IconButton(onClick = onClick) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Text(
+                "▶",
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun VideoPreviewDialog(
+    item: MediaItem,
+    onDismiss: () -> Unit
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            shape = RoundedCornerShape(22.dp),
+            color = Color.Black
+        ) {
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        item.name,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onDismiss) { Text("Close", color = Color.White) }
+                }
+                androidx.compose.ui.viewinterop.AndroidView(
+                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                    factory = { context ->
+                        android.widget.VideoView(context).apply {
+                            val controller = android.widget.MediaController(context)
+                            controller.setAnchorView(this)
+                            setMediaController(controller)
+                            setVideoURI(item.uri)
+                            setOnPreparedListener { player ->
+                                player.isLooping = false
+                                start()
+                            }
+                        }
+                    },
+                    update = { view ->
+                        if (view.tag != item.uri.toString()) {
+                            view.tag = item.uri.toString()
+                            view.setVideoURI(item.uri)
+                        }
+                    },
+                    onRelease = { view -> view.stopPlayback() }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ImageViewerDialog(
+    images: List<MediaItem>,
+    startIndex: Int,
+    onDismiss: () -> Unit
+) {
+    if (images.isEmpty()) return
+
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+        initialPage = startIndex.coerceIn(0, images.lastIndex),
+        pageCount = { images.size }
+    )
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(Modifier.fillMaxSize(), color = Color.Black) {
+            Box(Modifier.fillMaxSize()) {
+                androidx.compose.foundation.pager.HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    beyondViewportPageCount = 1
+                ) { page ->
+                    val item = images[page]
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = item.uri) {
+                        value = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            try {
+                                context.contentResolver.loadThumbnail(item.uri, Size(1800, 1800), null)
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
+                    }
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap!!.asImageBitmap(),
+                                contentDescription = item.name,
+                                modifier = Modifier.fillMaxSize().padding(8.dp),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                            )
+                        } else {
+                            CircularProgressIndicator(color = Color.White)
+                        }
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier.align(Alignment.TopCenter).padding(18.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color.Black.copy(alpha = 0.55f)
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = onDismiss) { Text("‹ Back", color = Color.White) }
+                        Text(
+                            "${pagerState.currentPage + 1} / ${images.size}",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.Black.copy(alpha = 0.6f)
+                ) {
+                    Text(
+                        images[pagerState.currentPage].name,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+@Composable
 private fun BackupScreenContent(
     state: BackupUiState,
     vm: BackupViewModel,
@@ -1503,16 +1660,6 @@ private fun galleryFolderName(item: MediaItem): String {
 
     val parts = path.split('/').filter { it.isNotBlank() }
     return parts.lastOrNull() ?: item.category.substringAfterLast('/')
-}
-
-private fun openImage(context: android.content.Context, uri: Uri, mimeType: String) {
-    try {
-        context.startActivity(Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, mimeType.ifBlank { "image/*" })
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        })
-    } catch (_: Exception) {
-    }
 }
 
 private fun formatDate(seconds: Long): String {
