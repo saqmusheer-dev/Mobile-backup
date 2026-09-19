@@ -19,7 +19,11 @@ import com.google.api.services.drive.DriveScopes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -176,7 +180,21 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         setForeground(createForegroundInfo("Uploading 0 of ${items.size}…", 0, items.size))
 
         val results = coroutineScope {
-            items.map { item ->
+            // Publish UI progress independently from the upload callbacks.
+            // This is important: blocking the Google HTTP thread on
+            // WorkManager progress writes can make tiny uploads appear to
+            // take minutes.
+            val progressTicker = launch {
+                while (isActive) {
+                    publishProgress(
+                        items.firstOrNull { activeBytes.containsKey(it.selectionKey) }?.name.orEmpty(),
+                        "uploading"
+                    )
+                    delay(250L)
+                }
+            }
+
+            val uploadResults = items.map { item ->
                 async(Dispatchers.IO) {
                     semaphore.withPermit {
                         if (isStopped) return@withPermit FileOutcome.STOPPED
@@ -192,10 +210,11 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                                     val current = (item.size * fraction.coerceIn(0.0, 1.0)).toLong()
                                     activeBytes[item.selectionKey] = current
 
-                                    if (fraction >= 1.0 || current >= 256L * 1024L) {
-                                        kotlinx.coroutines.runBlocking {
-                                            publishProgress(item.name, "uploading")
-                                        }
+                                    // Never block the HTTP upload thread with a
+                                    // WorkManager/database progress write. A background
+                                    // ticker below publishes progress instead.
+                                    if (fraction >= 1.0) {
+                                        activeBytes[item.selectionKey] = item.size
                                     }
                                 },
                                 prefs.driveDestinationId,
@@ -251,6 +270,9 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                     }
                 }
             }.awaitAll()
+
+            progressTicker.cancelAndJoin()
+            uploadResults
         }
 
         if (isStopped) {
@@ -270,6 +292,19 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         }
 
         saveStatus(message)
+
+        // Keep the last completed result in app preferences so the Backup
+        // screen can still show the real result after WorkManager prunes the
+        // completed request or the app process is recreated.
+        prefs.lastBackupCompleted = completed.get()
+        prefs.lastBackupTotal = items.size
+        prefs.lastBackupUploaded = uploaded.get()
+        prefs.lastBackupAlready = alreadyBackedUp.get()
+        prefs.lastBackupFailed = failed.get()
+        prefs.lastBackupBytesCompleted = completedBytes.get()
+        prefs.lastBackupBytesTotal = totalBytes
+        prefs.lastBackupMessage = message
+
         return Result.success(
             workDataOf(
                 "message" to message,
