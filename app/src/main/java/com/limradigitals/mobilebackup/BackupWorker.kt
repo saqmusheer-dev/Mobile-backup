@@ -71,6 +71,8 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         var alreadyBackedUp = 0
         var failed = 0
         var completed = 0
+        val totalBytes = items.sumOf { it.size }
+        var completedBytes = 0L
 
         setProgress(workDataOf(
             "completed" to 0,
@@ -88,6 +90,8 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
 
             setProgress(workDataOf(
                 "completed" to completed,
+                "completedBytes" to completedBytes,
+                "totalBytes" to totalBytes,
                 "uploaded" to uploaded,
                 "already" to alreadyBackedUp,
                 "failed" to failed,
@@ -105,7 +109,27 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
             )
 
             try {
-                when (drive.upload(item, null)) {
+                var lastReportedBytes = completedBytes
+                when (drive.upload(item, null) { currentFraction ->
+                    val currentBytes = (item.size * currentFraction.coerceIn(0.0, 1.0)).toLong()
+                    val overallBytes = completedBytes + currentBytes
+                    if (overallBytes - lastReportedBytes >= 256L * 1024L ||
+                        currentFraction >= 1.0
+                    ) {
+                        lastReportedBytes = overallBytes
+                        setProgressAsync(workDataOf(
+                            "completed" to completed,
+                            "completedBytes" to overallBytes,
+                            "totalBytes" to totalBytes,
+                            "uploaded" to uploaded,
+                            "already" to alreadyBackedUp,
+                            "failed" to failed,
+                            "total" to items.size,
+                            "name" to item.name,
+                            "phase" to "uploading"
+                        ))
+                    }
+                })) {
                     UploadResult.UPLOADED -> {
                         uploaded++
                      }
@@ -115,6 +139,8 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
 
                 setProgress(workDataOf(
                     "completed" to completed,
+                    "completedBytes" to completedBytes,
+                    "totalBytes" to totalBytes,
                     "uploaded" to uploaded,
                     "already" to alreadyBackedUp,
                     "failed" to failed,
@@ -159,6 +185,8 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
             Result.success(workDataOf(
                 "message" to message,
                 "completed" to completed,
+                "completedBytes" to completedBytes,
+                "totalBytes" to totalBytes,
                 "uploaded" to uploaded,
                 "already" to alreadyBackedUp,
                 "failed" to failed,
