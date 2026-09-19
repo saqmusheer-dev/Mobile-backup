@@ -129,7 +129,7 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                             "phase" to "uploading"
                         ))
                     }
-                }, prefs.driveDestinationId) {
+                }, prefs.driveDestinationId)) {
                     UploadResult.UPLOADED -> {
                         uploaded++
                     }
