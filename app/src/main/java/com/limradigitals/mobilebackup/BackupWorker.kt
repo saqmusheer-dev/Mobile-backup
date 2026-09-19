@@ -110,7 +110,7 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
 
             try {
                 var lastReportedBytes = completedBytes
-                when (drive.upload(item, knownBackedUpKeys) { currentFraction ->
+                when (drive.upload(item, knownBackedUpKeys, { currentFraction ->
                     val currentBytes = (item.size * currentFraction.coerceIn(0.0, 1.0)).toLong()
                     val overallBytes = completedBytes + currentBytes
                     if (overallBytes - lastReportedBytes >= 256L * 1024L ||
@@ -129,7 +129,7 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                             "phase" to "uploading"
                         ))
                     }
-                }) {
+                }, prefs.driveDestinationId) {
                     UploadResult.UPLOADED -> {
                         uploaded++
                     }
