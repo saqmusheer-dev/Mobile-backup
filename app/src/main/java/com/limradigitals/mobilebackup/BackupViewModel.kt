@@ -195,8 +195,23 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             WorkInfo.State.FAILED -> {
+                val completed = work.outputData.getInt("completed", _state.value.backupCompleted)
+                val total = work.outputData.getInt("total", _state.value.backupTotal)
+                val completedBytes = work.outputData.getLong("completedBytes", _state.value.backupBytesCompleted)
+                val totalBytes = work.outputData.getLong("totalBytes", _state.value.backupBytesTotal)
+                val uploaded = work.outputData.getInt("uploaded", _state.value.backupUploaded)
+                val already = work.outputData.getInt("already", _state.value.backupAlready)
+                val failed = work.outputData.getInt("failed", _state.value.backupFailed)
                 _state.value = _state.value.copy(
                     backupRunning = false,
+                    backupCompleted = completed,
+                    backupTotal = total,
+                    backupUploaded = uploaded,
+                    backupAlready = already,
+                    backupFailed = failed,
+                    backupBytesCompleted = completedBytes,
+                    backupBytesTotal = totalBytes,
+                    pending = (total - completed).coerceAtLeast(0),
                     message = work.outputData.getString("message")
                         ?: "Backup failed. Please try again."
                 )
