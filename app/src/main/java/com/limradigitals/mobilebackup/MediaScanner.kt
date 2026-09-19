@@ -11,7 +11,8 @@ data class MediaItem(
     val mimeType: String,
     val size: Long,
     val modifiedSeconds: Long,
-    val category: String
+    val category: String,
+    val relativePath: String = ""
 ) {
     val selectionKey: String
         get() = uri.toString() + "|" + size + "|" + modifiedSeconds
@@ -90,7 +91,8 @@ class MediaScanner(private val context: Context) {
                     cursor.getString(mime) ?: "application/octet-stream",
                     cursor.getLong(size),
                     cursor.getLong(modified),
-                    category
+                    category,
+                    relativePath
                 ))
             }
         }
