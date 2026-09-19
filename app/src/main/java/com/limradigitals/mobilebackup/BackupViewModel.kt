@@ -708,7 +708,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun enqueueBackup() {
         val constraints = Constraints.Builder()
-            .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+            .setRequiredNetworkType(prefs.networkType())
             .build()
 
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
