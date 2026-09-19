@@ -265,7 +265,14 @@ class DriveBackup(private val context: Context) {
                     }
                 )
             }
-            create.mediaHttpUploader.isDirectUploadEnabled = item.size <= 5L * 1024L * 1024L
+            // Phone backup files are commonly already-compressed binary data.
+            // Avoid gzip buffering/CPU overhead for the upload body.
+            create.mediaHttpUploader.setDisableGZipContent(true)
+
+            // Small files use one direct request; larger files use large
+            // resumable chunks for reliability without tiny request overhead.
+            create.mediaHttpUploader.isDirectUploadEnabled =
+                item.size <= 5L * 1024L * 1024L
             if (!create.mediaHttpUploader.isDirectUploadEnabled) {
                 create.mediaHttpUploader.chunkSize = 8 * 1024 * 1024
             }
