@@ -6,12 +6,14 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.graphics.Bitmap
 import android.media.MediaPlayer
 import android.util.Size
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
@@ -50,6 +52,21 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { }
 
+    private var pendingMoveFolder: String? = null
+
+    private val moveWriteLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val folder = pendingMoveFolder
+        pendingMoveFolder = null
+        if (result.resultCode == RESULT_OK && folder != null) {
+            vm.moveSelectedToFolder(folder)
+        } else {
+            vm.cancelMoveRequest()
+            vm.setMessage("Move cancelled. Android permission was not granted.")
+        }
+    }
+
     private val driveLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -84,7 +101,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                BackupApp(vm, driveLauncher, ::shareZip)
+                BackupApp(vm, driveLauncher, ::shareZip, ::requestMove)
             }
         }
     }
@@ -92,6 +109,26 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::vm.isInitialized) vm.refreshStorageAccess()
+    }
+
+    private fun requestMove(folder: String) {
+        val uris = vm.selectedMediaUris()
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || uris.isEmpty()) {
+            vm.moveSelectedToFolder(folder)
+            return
+        }
+
+        try {
+            pendingMoveFolder = folder
+            val request = MediaStore.createWriteRequest(contentResolver, uris)
+            moveWriteLauncher.launch(
+                IntentSenderRequest.Builder(request.intentSender).build()
+            )
+        } catch (_: Exception) {
+            pendingMoveFolder = null
+            vm.moveSelectedToFolder(folder)
+        }
     }
 
     private fun requestStoragePermissions() {
@@ -126,7 +163,8 @@ class MainActivity : ComponentActivity() {
 private fun BackupApp(
     vm: BackupViewModel,
     driveLauncher: ActivityResultLauncher<Intent>,
-    shareZip: (Uri) -> Unit
+    shareZip: (Uri) -> Unit,
+    requestMove: (String) -> Unit
 ) {
     val state by vm.state.collectAsState()
     var screen by remember { mutableStateOf("Backup") }
@@ -166,7 +204,7 @@ private fun BackupApp(
     ) { pad ->
         when (screen) {
             "Gallery" -> GalleryScreen(state, vm, { screen = "Organize" }, Modifier.padding(pad))
-            "Organize" -> OrganizeScreen(state, vm, Modifier.padding(pad))
+            "Organize" -> OrganizeScreen(state, vm, requestMove, Modifier.padding(pad))
             "Accounts" -> AccountsScreen(state, vm, driveLauncher, Modifier.padding(pad))
             "Settings" -> SettingsScreen(state, vm, Modifier.padding(pad))
             else -> BackupScreenContent(state, vm, shareZip, Modifier.padding(pad))
@@ -186,11 +224,27 @@ private fun GalleryScreen(
     modifier: Modifier = Modifier
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    var selectedFolder by remember { mutableStateOf<String?>(null) }
+
     val images = remember(state.scannedItems) {
         state.scannedItems.filter {
             it.mimeType.startsWith("image/") || it.category.endsWith("/Images")
         }
     }
+
+    val folders = remember(images) {
+        images.groupBy { galleryFolderName(it) }
+            .mapValues { it.value.size }
+            .toList()
+            .sortedBy { it.first.lowercase(Locale.getDefault()) }
+    }
+
+    val visibleImages = if (selectedFolder == null) {
+        images
+    } else {
+        images.filter { galleryFolderName(it) == selectedFolder }
+    }
+
     val selectedImages = state.selectedKeys.count { key ->
         images.any { it.selectionKey == key }
     }
@@ -200,23 +254,48 @@ private fun GalleryScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Card(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Photo Gallery", style = MaterialTheme.typography.titleLarge)
-                    Text("${images.size} images • $selectedImages selected")
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Photo Gallery", style = MaterialTheme.typography.titleLarge)
+                        Text("${images.size} images • $selectedImages selected")
+                    }
+                    Button(onClick = onOrganize, enabled = selectedImages > 0) {
+                        Text("Organize")
+                    }
                 }
-                Button(onClick = onOrganize, enabled = selectedImages > 0) {
-                    Text("Organize")
+
+                Text("Folders", style = MaterialTheme.typography.titleMedium)
+
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        GalleryFolderCard(
+                            name = "All Images",
+                            count = images.size,
+                            selected = selectedFolder == null,
+                            onClick = { selectedFolder = null }
+                        )
+                    }
+                    items(folders) { (folder, count) ->
+                        GalleryFolderCard(
+                            name = folder,
+                            count = count,
+                            selected = selectedFolder == folder,
+                            onClick = { selectedFolder = folder }
+                        )
+                    }
                 }
             }
         }
 
-        if (images.isEmpty()) {
+        if (visibleImages.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No images found. Scan your selected categories first.")
+                Text("No images found in this folder.")
             }
         } else {
             LazyVerticalGrid(
@@ -226,7 +305,7 @@ private fun GalleryScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 contentPadding = PaddingValues(bottom = 12.dp)
             ) {
-                items(images, key = { it.selectionKey }) { item ->
+                items(visibleImages, key = { it.selectionKey }) { item ->
                     GalleryTile(
                         item,
                         state.selectedKeys.contains(item.selectionKey),
@@ -236,6 +315,39 @@ private fun GalleryScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun GalleryFolderCard(
+    name: String,
+    count: Int,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.width(112.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected)
+                MaterialTheme.colorScheme.primaryContainer
+            else
+                MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            Modifier.padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("📁", fontSize = 30.sp)
+            Text(
+                name,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelLarge
+            )
+            Text("$count images", style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -498,14 +610,21 @@ private fun AudioPreviewButton(
         onClick = { controller.toggle(context, item) },
         enabled = !loading
     ) {
-        Text(
-            when {
-                loading -> "…"
-                playing -> "❚❚"
-                else -> "▶"
-            },
-            style = MaterialTheme.typography.titleMedium
-        )
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Text(
+                when {
+                    loading -> "…"
+                    playing -> "❚❚"
+                    else -> "▶"
+                },
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+        }
     }
 }
 
@@ -719,6 +838,7 @@ private fun BackupProgressDialog(state: BackupUiState, vm: BackupViewModel) {
 private fun OrganizeScreen(
     state: BackupUiState,
     vm: BackupViewModel,
+    requestMove: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showNewFolder by remember { mutableStateOf(false) }
@@ -755,9 +875,13 @@ private fun OrganizeScreen(
         item {
             Button(
                 onClick = { showFolderPicker = true },
-                enabled = state.selectedKeys.isNotEmpty() && state.localFolders.isNotEmpty(),
+                enabled = state.selectedKeys.isNotEmpty() &&
+                    state.localFolders.isNotEmpty() &&
+                    !state.organizeRunning,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Move Selected Files") }
+            ) {
+                Text(if (state.organizeRunning) "Moving…" else "Move Selected Files")
+            }
         }
 
         if (state.localFolders.isEmpty()) {
@@ -814,8 +938,9 @@ private fun OrganizeScreen(
                 Column {
                     state.localFolders.forEach { folder ->
                         TextButton(
+                            enabled = !state.organizeRunning,
                             onClick = {
-                                vm.moveSelectedToFolder(folder)
+                                requestMove(folder)
                                 showFolderPicker = false
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -955,6 +1080,14 @@ private fun SettingRow(label: String, checked: Boolean, onChange: (Boolean) -> U
         Text(label)
         Switch(checked = checked, onCheckedChange = onChange)
     }
+}
+
+private fun galleryFolderName(item: MediaItem): String {
+    val path = item.relativePath.trim('/').trim()
+    if (path.isBlank()) return item.category.substringAfterLast('/')
+
+    val parts = path.split('/').filter { it.isNotBlank() }
+    return parts.lastOrNull() ?: item.category.substringAfterLast('/')
 }
 
 private fun openImage(context: android.content.Context, uri: Uri, mimeType: String) {
