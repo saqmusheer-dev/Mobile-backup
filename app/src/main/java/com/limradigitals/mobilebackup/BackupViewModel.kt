@@ -93,7 +93,15 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             whatsappDocuments = prefs.whatsappDocuments,
             downloads = prefs.downloads,
             allFilesAccess = hasAllFilesAccess(),
-            localFolders = folderStore.list()
+            localFolders = folderStore.list(),
+            backupCompleted = prefs.lastBackupCompleted,
+            backupTotal = prefs.lastBackupTotal,
+            backupUploaded = prefs.lastBackupUploaded,
+            backupAlready = prefs.lastBackupAlready,
+            backupFailed = prefs.lastBackupFailed,
+            backupBytesCompleted = prefs.lastBackupBytesCompleted,
+            backupBytesTotal = prefs.lastBackupBytesTotal,
+            message = prefs.lastBackupMessage
         )
     )
     val state = _state.asStateFlow()
@@ -170,9 +178,11 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                     emptySet()
                 }
 
+                val finalMessage = work.outputData.getString("message") ?: "Backup complete."
                 _state.value = _state.value.copy(
                     backupRunning = false,
                     backupCompleted = completed,
+                    backupTotal = maxOf(_state.value.backupTotal, completed),
                     backupUploaded = uploaded,
                     backupAlready = already,
                     backupFailed = failed,
@@ -181,7 +191,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                     backupCurrentName = "",
                     backupBytesCompleted = completedBytes,
                     backupBytesTotal = totalBytes,
-                    message = work.outputData.getString("message") ?: "Backup complete."
+                    message = finalMessage
                 )
             }
             WorkInfo.State.FAILED -> {
