@@ -58,13 +58,10 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         }
 
         val drive = DriveBackup(applicationContext)
-        val knownBackedUpKeys: Set<String>? = try {
-            drive.findExistingKeys(items.map { drive.backupKey(it) }.toSet())
-        } catch (_: Exception) {
-            null
-        }
-        // Check only the selected files in a small batched Drive query. This avoids
-        // one network search per file while keeping duplicate detection reliable.
+        val knownBackedUpKeys: Set<String> =
+            inputData.getStringArray("knownBackedUpKeys")?.toSet().orEmpty()
+        // Reuse the backup status already discovered by the app scan. This avoids
+        // another Drive search immediately before the actual upload.
         var uploaded = 0
         var alreadyBackedUp = 0
         var failed = 0
