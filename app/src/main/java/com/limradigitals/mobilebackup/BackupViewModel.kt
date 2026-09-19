@@ -27,6 +27,8 @@ data class BackupUiState(
     val pending: Int = 0,
     val driveConnected: Boolean = false,
     val driveAccountEmail: String? = null,
+    val driveDestinationId: String? = null,
+    val driveDestinationName: String = "Mobile Backup (default)",
     val wifiOnly: Boolean = true,
     val autoBackup: Boolean = false,
     val deleteAfterVerified: Boolean = false,
@@ -75,6 +77,8 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         BackupUiState(
             driveConnected = DriveBackup(app).isConnected(),
             driveAccountEmail = DriveBackup(app).account()?.email,
+            driveDestinationId = prefs.driveDestinationId,
+            driveDestinationName = prefs.driveDestinationName,
             wifiOnly = prefs.wifiOnly,
             autoBackup = prefs.autoBackup,
             deleteAfterVerified = prefs.deleteAfterVerified,
@@ -99,10 +103,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             WorkInfo.State.ENQUEUED -> {
                 _state.value = _state.value.copy(
                     backupRunning = true,
-                    message = if (prefs.wifiOnly)
-                        "Backup waiting for Wi-Fi..."
-                    else
-                        "Backup queued. Starting..."
+                    message = "Backup queued. Android will start it when the network constraint is satisfied..."
                 )
             }
             WorkInfo.State.RUNNING -> {
@@ -401,6 +402,26 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    fun setDriveDestination(id: String?, name: String) {
+        prefs.driveDestinationId = id
+        prefs.driveDestinationName = name
+        _state.value = _state.value.copy(
+            driveDestinationId = id,
+            driveDestinationName = name,
+            message = "Drive upload destination: " + name
+        )
+    }
+
+    suspend fun listDriveFolders(parentId: String): List<DriveFolder> =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            DriveBackup(getApplication()).listFolders(parentId)
+        }
+
+    suspend fun createDriveFolder(name: String, parentId: String): DriveFolder =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            DriveBackup(getApplication()).createDriveFolder(name, parentId)
+        }
+
     fun startBackup() {
         if (_state.value.selectedKeys.isEmpty()) {
             _state.value = _state.value.copy(message = "Select at least one file to back up.")
@@ -432,10 +453,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 .filter { _state.value.selectedKeys.contains(it.selectionKey) }
                 .sumOf { it.size },
             pending = total,
-            message = if (prefs.wifiOnly)
-                "Backup waiting for Wi-Fi..."
-            else
-                "Backup queued. Starting..."
+            message = "Backup queued. Starting as soon as Android releases the network constraint..."
         )
 
         enqueueBackup()
