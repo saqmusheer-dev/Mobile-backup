@@ -613,6 +613,7 @@ private fun DriveFolderPickerDialog(
     var loading by remember { mutableStateOf(true) }
     var showCreate by remember { mutableStateOf(false) }
     var newFolderName by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(currentId) {
         loading = true
@@ -718,7 +719,7 @@ private fun DriveFolderPickerDialog(
                         val name = newFolderName.trim()
                         showCreate = false
                         newFolderName = ""
-                        kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+                        scope.launch {
                             try {
                                 val created = vm.createDriveFolder(name, currentId)
                                 vm.setDriveDestination(created.id, created.name)
