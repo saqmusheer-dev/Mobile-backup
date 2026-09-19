@@ -1100,6 +1100,25 @@ private fun BackupProgressCard(state: BackupUiState) {
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+
+            val successfulTransfer = !state.backupRunning &&
+                state.backupTotal > 0 &&
+                state.backupFailed == 0 &&
+                (state.backupUploaded + state.backupAlready) == state.backupTotal
+
+            if (successfulTransfer) {
+                Button(
+                    onClick = { },
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        disabledContainerColor = Color(0xFF2E9D50),
+                        disabledContentColor = Color.White
+                    )
+                ) {
+                    Text("✓ Successfully transferred")
+                }
+            }
         }
     }
 }
