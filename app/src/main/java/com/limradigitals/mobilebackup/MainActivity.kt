@@ -1092,6 +1092,12 @@ private fun BackupProgressCard(state: BackupUiState) {
                     state.backupFailed + " failed",
                 style = MaterialTheme.typography.bodySmall
             )
+            if (!state.backupRunning && state.backupFailed > 0 && state.message.isNotBlank()) {
+                Text(
+                    state.message,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
             if (state.backupRunning && state.backupCurrentName.isNotBlank()) {
                 Text(
                     state.backupCurrentName,
