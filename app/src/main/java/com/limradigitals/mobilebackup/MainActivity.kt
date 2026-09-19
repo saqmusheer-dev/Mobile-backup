@@ -111,7 +111,16 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MaterialTheme {
+            MaterialTheme(
+                typography = Typography().copy(
+                    bodyLarge = Typography().bodyLarge.copy(fontSize = 17.sp),
+                    bodyMedium = Typography().bodyMedium.copy(fontSize = 16.sp),
+                    bodySmall = Typography().bodySmall.copy(fontSize = 14.sp),
+                    labelLarge = Typography().labelLarge.copy(fontSize = 15.sp),
+                    labelMedium = Typography().labelMedium.copy(fontSize = 14.sp),
+                    labelSmall = Typography().labelSmall.copy(fontSize = 13.sp)
+                )
+            ) {
                 BackupApp(vm, driveLauncher, ::shareZip, ::requestMove, ::requestDelete)
             }
         }
@@ -566,7 +575,7 @@ private fun BackupScreenContent(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        "Files will be placed in this folder, with Mobile Backup category folders underneath.",
+                        "Selected files will be uploaded directly into this Drive folder.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedButton(
