@@ -530,13 +530,17 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _state.value = _state.value.copy(organizeRunning = true, message = "Moving files into $folder...")
+                _state.value = _state.value.copy(
+                    organizeRunning = true,
+                    message = "Moving files into $folder..."
+                )
                 val result = LocalOrganizer.moveToFolder(getApplication(), items, folder)
                 val message = if (result.failed == 0) {
                     "${result.moved} files moved to Download/Mobile Backup/$folder."
                 } else {
                     "${result.moved} moved, ${result.failed} could not be moved. Android may require permission to modify media from another app."
                 }
+
                 if (result.failed == 0) {
                     val movedKeys = items.map { it.selectionKey }.toSet()
                     val updatedItems = _state.value.scannedItems.map { item ->
@@ -553,17 +557,18 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                         organizeRunning = false
                     )
                 } else {
-                    _state.value = _state.value.copy(message = message, organizeRunning = false)
+                    _state.value = _state.value.copy(
+                        message = message,
+                        organizeRunning = false
+                    )
                 }
             } catch (e: Exception) {
-                _state.value = _state.value.copy(organizeRunning = false, message = "Move failed: " + (e.message ?: e.javaClass.simpleName))
-            }
                 _state.value = _state.value.copy(
+                    organizeRunning = false,
                     message = "Move failed: " + (e.message ?: e.javaClass.simpleName)
                 )
             }
         }
-    }
 
     private fun enqueueBackup() {
         val constraints = Constraints.Builder()
