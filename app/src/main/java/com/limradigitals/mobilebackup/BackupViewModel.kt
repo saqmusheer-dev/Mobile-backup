@@ -583,6 +583,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
         }
+    }
 
     private fun enqueueBackup() {
         val constraints = Constraints.Builder()
