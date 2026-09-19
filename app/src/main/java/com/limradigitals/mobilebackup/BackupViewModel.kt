@@ -453,7 +453,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                 .filter { _state.value.selectedKeys.contains(it.selectionKey) }
                 .sumOf { it.size },
             pending = total,
-            message = "Backup queued. Starting as soon as Android releases the network constraint..."
+            message = "Starting backup as soon as a network connection is available..."
         )
 
         enqueueBackup()
@@ -707,8 +707,10 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun enqueueBackup() {
+        // Manual backup should use either Wi-Fi or mobile data.
+        // Wi-Fi Only remains available for automatic scheduled backups.
         val constraints = Constraints.Builder()
-            .setRequiredNetworkType(prefs.networkType())
+            .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
             .build()
 
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
