@@ -380,6 +380,10 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             }
     }
 
+    private fun selectableItems(): List<MediaItem> =
+        (_state.value.scannedItems + _state.value.localStorageItems)
+            .distinctBy { it.selectionKey }
+
     fun toggleFile(item: MediaItem) {
         val selected = _state.value.selectedKeys.toMutableSet()
         if (!selected.add(item.selectionKey)) selected.remove(item.selectionKey)
@@ -457,7 +461,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun applySelection(selected: Set<String>) {
-        val items = _state.value.scannedItems
+        val items = selectableItems()
         selectionStore.saveSelected(selected)
         _state.value = _state.value.copy(
             selectedKeys = selected,
@@ -671,9 +675,8 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun selectedMediaUris(): List<Uri> = _state.value.scannedItems
+    fun selectedMediaUris(): List<Uri> = selectableItems()
         .filter { _state.value.selectedKeys.contains(it.selectionKey) }
-        .filter { it.mimeType.startsWith("image/") || it.mimeType.startsWith("video/") || it.mimeType.startsWith("audio/") }
         .map { it.uri }
 
     fun cancelMoveRequest() {
@@ -740,7 +743,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun moveSelectedToFolder(folder: String) {
-        val items = _state.value.scannedItems.filter {
+        val items = selectableItems().filter {
             _state.value.selectedKeys.contains(it.selectionKey)
         }
         if (items.isEmpty()) {
@@ -758,7 +761,11 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                     organizeFailed = 0,
                     message = "Moving files into " + folder + "..."
                 )
-                LocalOrganizer.ensureFolder(getApplication(), folder)
+                if (!LocalOrganizer.ensureFolder(getApplication(), folder)) {
+                    throw IOException(
+                        "Storage access is required to create the Mobile Backup folder."
+                    )
+                }
                 val result = LocalOrganizer.moveToFolder(
                     getApplication(),
                     items,
@@ -779,21 +786,28 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
                 if (result.failed == 0) {
                     val movedKeys = items.map { it.selectionKey }.toSet()
-                    val updatedItems = _state.value.scannedItems.map { item ->
+                    val updatedScanned = _state.value.scannedItems.map { item ->
+                        if (movedKeys.contains(item.selectionKey)) {
+                            item.copy(relativePath = "Download/Mobile Backup/$folder/")
+                        } else item
+                    }
+                    val updatedLocal = _state.value.localStorageItems.map { item ->
                         if (movedKeys.contains(item.selectionKey)) {
                             item.copy(relativePath = "Download/Mobile Backup/$folder/")
                         } else item
                     }
                     _state.value = _state.value.copy(
                         message = message,
-                        scannedItems = updatedItems,
+                        scannedItems = updatedScanned,
+                        localStorageItems = updatedLocal,
                         selectedKeys = emptySet(),
                         selectedBytes = 0L,
                         pending = 0,
                         organizeRunning = false,
                         organizeCompleted = items.size,
                         organizeMoved = result.moved,
-                        organizeFailed = result.failed
+                        organizeFailed = result.failed,
+                        localFolders = folderStore.list()
                     )
                 } else {
                     _state.value = _state.value.copy(
