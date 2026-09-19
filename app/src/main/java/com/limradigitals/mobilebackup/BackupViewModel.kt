@@ -72,6 +72,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     private val selectionStore = SelectionStore(app)
     private val folderStore = LocalFolderStore(app)
     private val workManager = WorkManager.getInstance(app)
+    private var observedWorkId: String? = null
 
     private val _state = MutableStateFlow(
         BackupUiState(
@@ -98,7 +99,15 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     val state = _state.asStateFlow()
 
     private val workObserver = Observer<List<WorkInfo>> { infos ->
-        val work = infos.firstOrNull() ?: return@Observer
+        // Unique work can expose more than one WorkInfo while a request is
+        // being replaced. Observe the active request first; never rely on
+        // firstOrNull(), because that can make progress appear to jump back.
+        val work = infos.firstOrNull { it.state == WorkInfo.State.RUNNING }
+            ?: infos.firstOrNull { it.state == WorkInfo.State.ENQUEUED }
+            ?: infos.firstOrNull()
+            ?: return@Observer
+
+        observedWorkId = work.id.toString()
         when (work.state) {
             WorkInfo.State.ENQUEUED -> {
                 _state.value = _state.value.copy(
@@ -124,17 +133,27 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                     else -> "Starting backup..."
                 }
 
+                // WorkManager progress can be delivered after another
+                // update. Keep the visible counters monotonic for this run.
+                val safeCompleted = maxOf(_state.value.backupCompleted, completed)
+                val safeUploaded = maxOf(_state.value.backupUploaded, uploaded)
+                val safeAlready = maxOf(_state.value.backupAlready, already)
+                val safeFailed = maxOf(_state.value.backupFailed, failed)
+                val safeBytes = maxOf(_state.value.backupBytesCompleted, completedBytes)
+                val safeTotal = maxOf(_state.value.backupTotal, total)
+                val safeTotalBytes = maxOf(_state.value.backupBytesTotal, totalBytes)
+
                 _state.value = _state.value.copy(
                     backupRunning = true,
-                    backupCompleted = completed,
-                    backupTotal = total,
-                    backupUploaded = uploaded,
-                    backupAlready = already,
-                    backupFailed = failed,
+                    backupCompleted = safeCompleted,
+                    backupTotal = safeTotal,
+                    backupUploaded = safeUploaded,
+                    backupAlready = safeAlready,
+                    backupFailed = safeFailed,
                     backupCurrentName = name,
-                    backupBytesCompleted = completedBytes,
-                    backupBytesTotal = totalBytes,
-                    pending = (total - completed).coerceAtLeast(0),
+                    backupBytesCompleted = safeBytes,
+                    backupBytesTotal = safeTotalBytes,
+                    pending = (safeTotal - safeCompleted).coerceAtLeast(0),
                     message = message
                 )
             }
