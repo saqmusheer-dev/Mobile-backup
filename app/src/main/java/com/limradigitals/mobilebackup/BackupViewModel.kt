@@ -103,7 +103,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             WorkInfo.State.ENQUEUED -> {
                 _state.value = _state.value.copy(
                     backupRunning = true,
-                    message = "Backup queued. Android will start it when the network constraint is satisfied..."
+                    message = "Preparing upload... Wi-Fi or mobile data will be used automatically."
                 )
             }
             WorkInfo.State.RUNNING -> {
