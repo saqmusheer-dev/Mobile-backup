@@ -9,6 +9,7 @@ import com.google.android.gms.common.api.Scope
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport
 import com.google.api.client.http.InputStreamContent
+import com.google.api.client.googleapis.media.MediaHttpUploaderProgressListener
 import com.google.api.client.json.gson.GsonFactory
 import com.google.api.services.drive.Drive
 import com.google.api.services.drive.DriveScopes
@@ -131,7 +132,11 @@ class DriveBackup(private val context: Context) {
             .isNullOrEmpty()
     }
 
-    fun upload(item: MediaItem, knownBackedUpKeys: Set<String>? = null): UploadResult {
+    fun upload(
+        item: MediaItem,
+        knownBackedUpKeys: Set<String>? = null,
+        onProgress: ((Double) -> Unit)? = null
+    ): UploadResult {
         val d = drive()
         val key = sourceKey(item)
 
@@ -153,6 +158,17 @@ class DriveBackup(private val context: Context) {
             }
 
             val create = d.files().create(metadata, media).setFields("id,name,size")
+            if (onProgress != null) {
+                create.mediaHttpUploader.setProgressListener(
+                    object : MediaHttpUploaderProgressListener {
+                        override fun progressChanged(
+                            uploader: com.google.api.client.googleapis.media.MediaHttpUploader
+                        ) {
+                            onProgress(uploader.progress)
+                        }
+                    }
+                )
+            }
             create.mediaHttpUploader.isDirectUploadEnabled = item.size <= 5L * 1024L * 1024L
             if (!create.mediaHttpUploader.isDirectUploadEnabled) {
                 create.mediaHttpUploader.chunkSize = 8 * 1024 * 1024
