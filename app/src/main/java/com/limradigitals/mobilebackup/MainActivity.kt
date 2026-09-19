@@ -212,10 +212,6 @@ private fun BackupApp(
         }
     }
 
-    if (showDrivePicker) {
-        DriveFolderPickerDialog(state, vm) { showDrivePicker = false }
-    }
-
     if (state.backupRunning) {
         BackupProgressDialog(state, vm)
     }
@@ -597,6 +593,10 @@ private fun BackupScreenContent(
                 style = MaterialTheme.typography.bodySmall
             )
         }
+    }
+
+    if (showDrivePicker) {
+        DriveFolderPickerDialog(state, vm) { showDrivePicker = false }
     }
 }
 
