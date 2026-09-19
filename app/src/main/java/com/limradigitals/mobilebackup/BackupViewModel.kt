@@ -52,6 +52,8 @@ data class BackupUiState(
     val backupAlready: Int = 0,
     val backupFailed: Int = 0,
     val backupCurrentName: String = "",
+    val backupBytesCompleted: Long = 0L,
+    val backupBytesTotal: Long = 0L,
     val lastZipUri: Uri? = null,
     val localFolders: List<String> = emptyList(),
     val organizeRunning: Boolean = false
@@ -99,6 +101,8 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             }
             WorkInfo.State.RUNNING -> {
                 val completed = work.progress.getInt("completed", 0)
+                val completedBytes = work.progress.getLong("completedBytes", 0L)
+                val totalBytes = work.progress.getLong("totalBytes", 0L)
                 val uploaded = work.progress.getInt("uploaded", 0)
                 val already = work.progress.getInt("already", 0)
                 val failed = work.progress.getInt("failed", 0)
@@ -121,12 +125,16 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                     backupAlready = already,
                     backupFailed = failed,
                     backupCurrentName = name,
+                    backupBytesCompleted = completedBytes,
+                    backupBytesTotal = totalBytes,
                     pending = (total - completed).coerceAtLeast(0),
                     message = message
                 )
             }
             WorkInfo.State.SUCCEEDED -> {
                 val completed = work.outputData.getInt("completed", _state.value.backupTotal)
+                val completedBytes = work.outputData.getLong("completedBytes", _state.value.backupBytesCompleted)
+                val totalBytes = work.outputData.getLong("totalBytes", _state.value.backupBytesTotal)
                 val uploaded = work.outputData.getInt("uploaded", _state.value.backupUploaded)
                 val already = work.outputData.getInt("already", _state.value.backupAlready)
                 val failed = work.outputData.getInt("failed", _state.value.backupFailed)
@@ -145,6 +153,8 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
                     backedUpKeys = _state.value.backedUpKeys + successfulKeys,
                     pending = 0,
                     backupCurrentName = "",
+                    backupBytesCompleted = completedBytes,
+                    backupBytesTotal = totalBytes,
                     message = work.outputData.getString("message") ?: "Backup complete."
                 )
             }
@@ -411,6 +421,10 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             backupAlready = 0,
             backupFailed = 0,
             backupCurrentName = "",
+            backupBytesCompleted = 0L,
+            backupBytesTotal = _state.value.scannedItems
+                .filter { _state.value.selectedKeys.contains(it.selectionKey) }
+                .sumOf { it.size },
             pending = total,
             message = if (prefs.wifiOnly)
                 "Backup waiting for Wi-Fi..."
