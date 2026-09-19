@@ -39,7 +39,8 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
     companion object {
         private const val CHANNEL_ID = "backup_progress"
         private const val NOTIFICATION_ID = 4101
-        private const val MAX_CONCURRENT_UPLOADS = 4
+        private const val MAX_CONCURRENT_UPLOADS = 2
+        private const val MAX_FILE_UPLOAD_ATTEMPTS = 3
     }
 
     override suspend fun doWork(): Result {
@@ -100,6 +101,7 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         val alreadyBackedUp = AtomicInteger(0)
         val failed = AtomicInteger(0)
         val completed = AtomicInteger(0)
+        val firstError = java.util.concurrent.atomic.AtomicReference<String?>(null)
         val completedBytes = AtomicLong(0L)
         val activeBytes = ConcurrentHashMap<String, Long>()
         val totalBytes = items.sumOf { it.size }
@@ -203,26 +205,37 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                         try {
                             publishProgress(item.name, "uploading")
 
-                            val result = drive.upload(
-                                item,
-                                knownBackedUpKeys,
-                                { fraction ->
-                                    val current = (item.size * fraction.coerceIn(0.0, 1.0)).toLong()
-                                    activeBytes[item.selectionKey] = current
+                            var result: UploadResult? = null
+                            var lastException: Exception? = null
 
-                                    // Never block the HTTP upload thread with a
-                                    // WorkManager/database progress write. A background
-                                    // ticker below publishes progress instead.
-                                    if (fraction >= 1.0) {
-                                        activeBytes[item.selectionKey] = item.size
+                            repeat(MAX_FILE_UPLOAD_ATTEMPTS) { attempt ->
+                                if (result != null) return@repeat
+
+                                try {
+                                    result = drive.upload(
+                                        item,
+                                        knownBackedUpKeys,
+                                        { fraction ->
+                                            val current = (item.size * fraction.coerceIn(0.0, 1.0)).toLong()
+                                            activeBytes[item.selectionKey] = current
+                                        },
+                                        prefs.driveDestinationId,
+                                        resolvedParents[
+                                            prefs.driveDestinationId?.takeIf { it.isNotBlank() }
+                                                ?: item.category
+                                        ]
+                                    )
+                                } catch (e: Exception) {
+                                    lastException = e
+                                    if (attempt < MAX_FILE_UPLOAD_ATTEMPTS - 1) {
+                                        delay(1000L * (attempt + 1))
                                     }
-                                },
-                                prefs.driveDestinationId,
-                                resolvedParents[
-                                    prefs.driveDestinationId?.takeIf { it.isNotBlank() }
-                                        ?: item.category
-                                ]
-                            )
+                                }
+                            }
+
+                            if (result == null) {
+                                throw lastException ?: IOException("Upload failed for " + item.name)
+                            }
 
                             when (result) {
                                 UploadResult.UPLOADED -> {
@@ -252,7 +265,9 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                         } catch (e: Exception) {
                             activeBytes.remove(item.selectionKey)
                             failed.incrementAndGet()
-                            val done = completed.incrementAndGet()
+                            completed.incrementAndGet()
+                            val detail = e.message?.take(180) ?: e.javaClass.simpleName
+                            firstError.compareAndSet(null, item.name + ": " + detail)
 
                             publishProgress(
                                 item.name,
@@ -260,12 +275,8 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
                                 completedBytes.get()
                             )
 
-                            if (e is IOException) {
-                                saveKnownKeys()
-                                FileOutcome.RETRYABLE_FAILURE
-                            } else {
-                                FileOutcome.PERMANENT_FAILURE
-                            }
+                            saveKnownKeys()
+                            FileOutcome.PERMANENT_FAILURE
                         }
                     }
                 }
@@ -282,20 +293,18 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
 
         saveKnownKeys()
 
-        val retryableFailures = results.count { it == FileOutcome.RETRYABLE_FAILURE }
         val message = "Backup complete: ${uploaded.get()} uploaded, " +
             "${alreadyBackedUp.get()} already backed up, ${failed.get()} failed."
-
-        if (retryableFailures > 0) {
-            saveStatus("Some uploads need another attempt. " + message)
-            return Result.retry()
+        val finalMessage = if (failed.get() > 0) {
+            message + " Last error: " + (firstError.get() ?: "Unknown upload error.")
+        } else {
+            message
         }
 
-        saveStatus(message)
-
-        // Keep the last completed result in app preferences so the Backup
-        // screen can still show the real result after WorkManager prunes the
-        // completed request or the app process is recreated.
+        // Individual files already received their own short retry loop.
+        // Do not return Result.retry() for the whole batch: that would restart
+        // every file after WorkManager backoff and make the UI jump backwards.
+        saveStatus(finalMessage)
         prefs.lastBackupCompleted = completed.get()
         prefs.lastBackupTotal = items.size
         prefs.lastBackupUploaded = uploaded.get()
@@ -303,20 +312,24 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         prefs.lastBackupFailed = failed.get()
         prefs.lastBackupBytesCompleted = completedBytes.get()
         prefs.lastBackupBytesTotal = totalBytes
-        prefs.lastBackupMessage = message
+        prefs.lastBackupMessage = finalMessage
 
-        return Result.success(
-            workDataOf(
-                "message" to message,
-                "completed" to completed.get(),
-                "completedBytes" to completedBytes.get(),
-                "totalBytes" to totalBytes,
-                "uploaded" to uploaded.get(),
-                "already" to alreadyBackedUp.get(),
-                "failed" to failed.get(),
-                "total" to items.size
-            )
+        val output = workDataOf(
+            "message" to finalMessage,
+            "completed" to completed.get(),
+            "completedBytes" to completedBytes.get(),
+            "totalBytes" to totalBytes,
+            "uploaded" to uploaded.get(),
+            "already" to alreadyBackedUp.get(),
+            "failed" to failed.get(),
+            "total" to items.size
         )
+
+        return if (failed.get() > 0) {
+            Result.failure(output)
+        } else {
+            Result.success(output)
+        }
     }
 
     private enum class FileOutcome {
