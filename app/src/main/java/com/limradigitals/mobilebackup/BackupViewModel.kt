@@ -53,7 +53,8 @@ data class BackupUiState(
     val backupFailed: Int = 0,
     val backupCurrentName: String = "",
     val lastZipUri: Uri? = null,
-    val localFolders: List<String> = emptyList()
+    val localFolders: List<String> = emptyList(),
+    val organizeRunning: Boolean = false
 )
 
 class BackupViewModel(app: Application) : AndroidViewModel(app) {
@@ -501,6 +502,15 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun selectedMediaUris(): List<Uri> = _state.value.scannedItems
+        .filter { _state.value.selectedKeys.contains(it.selectionKey) }
+        .filter { it.mimeType.startsWith("image/") || it.mimeType.startsWith("video/") || it.mimeType.startsWith("audio/") }
+        .map { it.uri }
+
+    fun cancelMoveRequest() {
+        _state.value = _state.value.copy(organizeRunning = false)
+    }
+
     fun addLocalFolder(name: String) {
         if (folderStore.add(name)) {
             _state.value = _state.value.copy(localFolders = folderStore.list())
@@ -520,15 +530,34 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _state.value = _state.value.copy(message = "Moving files into $folder...")
+                _state.value = _state.value.copy(organizeRunning = true, message = "Moving files into $folder...")
                 val result = LocalOrganizer.moveToFolder(getApplication(), items, folder)
                 val message = if (result.failed == 0) {
                     "${result.moved} files moved to Download/Mobile Backup/$folder."
                 } else {
                     "${result.moved} moved, ${result.failed} could not be moved. Android may require permission to modify media from another app."
                 }
-                _state.value = _state.value.copy(message = message)
+                if (result.failed == 0) {
+                    val movedKeys = items.map { it.selectionKey }.toSet()
+                    val updatedItems = _state.value.scannedItems.map { item ->
+                        if (movedKeys.contains(item.selectionKey)) {
+                            item.copy(relativePath = "Download/Mobile Backup/$folder/")
+                        } else item
+                    }
+                    _state.value = _state.value.copy(
+                        message = message,
+                        scannedItems = updatedItems,
+                        selectedKeys = emptySet(),
+                        selectedBytes = 0L,
+                        pending = 0,
+                        organizeRunning = false
+                    )
+                } else {
+                    _state.value = _state.value.copy(message = message, organizeRunning = false)
+                }
             } catch (e: Exception) {
+                _state.value = _state.value.copy(organizeRunning = false, message = "Move failed: " + (e.message ?: e.javaClass.simpleName))
+            }
                 _state.value = _state.value.copy(
                     message = "Move failed: " + (e.message ?: e.javaClass.simpleName)
                 )
