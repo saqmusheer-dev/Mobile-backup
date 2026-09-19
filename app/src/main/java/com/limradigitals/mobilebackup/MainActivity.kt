@@ -55,6 +55,16 @@ class MainActivity : ComponentActivity() {
 
     private var pendingMoveFolder: String? = null
 
+    private val deleteWriteLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            vm.deleteSelectedFiles()
+        } else {
+            vm.setMessage("Delete cancelled. No files were deleted.")
+        }
+    }
+
     private val moveWriteLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
@@ -102,7 +112,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                BackupApp(vm, driveLauncher, ::shareZip, ::requestMove)
+                BackupApp(vm, driveLauncher, ::shareZip, ::requestMove, ::requestDelete)
             }
         }
     }
@@ -130,6 +140,26 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             pendingMoveFolder = null
             vm.failMoveRequest("Android could not request permission for these files.")
+        }
+    }
+
+    private fun requestDelete() {
+        val uris = vm.selectedUris()
+        if (uris.isEmpty()) {
+            vm.setMessage("Select files before deleting.")
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val request = MediaStore.createDeleteRequest(contentResolver, uris)
+                deleteWriteLauncher.launch(
+                    IntentSenderRequest.Builder(request.intentSender).build()
+                )
+            } catch (_: Exception) {
+                vm.setMessage("Android could not request delete permission for these files.")
+            }
+        } else {
+            vm.deleteSelectedFiles()
         }
     }
 
