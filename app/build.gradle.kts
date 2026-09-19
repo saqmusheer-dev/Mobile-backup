@@ -18,13 +18,13 @@ if (!fixedDebugKeystore.exists()) {
 
 android {
     namespace = "com.limradigitals.mobilebackup"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.limradigitals.mobilebackup"
         minSdk = 29
-        targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        targetSdk = 36
+        versionCode = 3
+        versionName = "1.0.0"
     }
     signingConfigs {
         getByName("debug") {
@@ -33,10 +33,45 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+
+        create("release") {
+            val keystoreBase64 = System.getenv("ANDROID_KEYSTORE_BASE64")
+            val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            val keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+            val keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+
+            if (!keystoreBase64.isNullOrBlank() &&
+                !keystorePassword.isNullOrBlank() &&
+                !keyAlias.isNullOrBlank() &&
+                !keyPassword.isNullOrBlank()
+            ) {
+                val releaseKeystore = layout.buildDirectory.file("release-keystore.jks").get().asFile
+                if (!releaseKeystore.exists()) {
+                    releaseKeystore.parentFile.mkdirs()
+                    releaseKeystore.writeBytes(Base64.getDecoder().decode(keystoreBase64))
+                }
+                storeFile = releaseKeystore
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
             signingConfig = signingConfigs.getByName("debug")
+        }
+        getByName("release") {
+            val hasReleaseSigning = !System.getenv("ANDROID_KEYSTORE_BASE64").isNullOrBlank()
+            if (!hasReleaseSigning) {
+                throw GradleException(
+                    "Release signing secrets are missing. Configure ANDROID_KEYSTORE_BASE64, " +
+                        "ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD."
+                )
+            }
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
     compileOptions {
