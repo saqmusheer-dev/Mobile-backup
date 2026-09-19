@@ -768,8 +768,12 @@ private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
 
 @Composable
 private fun BackupProgressCard(state: BackupUiState) {
-    val total = state.backupTotal.coerceAtLeast(1)
-    val progress = (state.backupCompleted.toFloat() / total).coerceIn(0f, 1f)
+    val byteTotal = state.backupBytesTotal
+    val progress = if (byteTotal > 0L) {
+        (state.backupBytesCompleted.toDouble() / byteTotal.toDouble()).coerceIn(0.0, 1.0).toFloat()
+    } else {
+        (state.backupCompleted.toFloat() / state.backupTotal.coerceAtLeast(1)).coerceIn(0f, 1f)
+    }
 
     Card(Modifier.fillMaxWidth()) {
         Column(
@@ -785,8 +789,10 @@ private fun BackupProgressCard(state: BackupUiState) {
                 modifier = Modifier.fillMaxWidth()
             )
             Text(
-                state.backupCompleted.toString() + " of " + state.backupTotal +
-                    " files • " + (progress * 100).toInt() + "%"
+                (progress * 100).toInt().toString() + "% • " +
+                    state.backupCompleted + " of " + state.backupTotal + " files • " +
+                    formatBytes(state.backupBytesCompleted) + " of " +
+                    formatBytes(state.backupBytesTotal)
             )
             Text(
                 state.backupUploaded.toString() + " uploaded • " +
@@ -808,8 +814,12 @@ private fun BackupProgressCard(state: BackupUiState) {
 
 @Composable
 private fun BackupProgressDialog(state: BackupUiState, vm: BackupViewModel) {
-    val total = state.backupTotal.coerceAtLeast(1)
-    val progress = (state.backupCompleted.toFloat() / total).coerceIn(0f, 1f)
+    val byteTotal = state.backupBytesTotal
+    val progress = if (byteTotal > 0L) {
+        (state.backupBytesCompleted.toDouble() / byteTotal.toDouble()).coerceIn(0.0, 1.0).toFloat()
+    } else {
+        (state.backupCompleted.toFloat() / state.backupTotal.coerceAtLeast(1)).coerceIn(0f, 1f)
+    }
 
     AlertDialog(
         onDismissRequest = { },
@@ -821,10 +831,12 @@ private fun BackupProgressDialog(state: BackupUiState, vm: BackupViewModel) {
                     progress = { progress },
                     modifier = Modifier.fillMaxWidth()
                 )
-                Text((progress * 100).toInt().toString() + "%")
+                Text((progress * 100).toInt().toString() + "% of data")
                 Text(
                     state.backupCompleted.toString() + " / " +
-                        state.backupTotal + " files processed"
+                        state.backupTotal + " files processed • " +
+                        formatBytes(state.backupBytesCompleted) + " / " +
+                        formatBytes(state.backupBytesTotal)
                 )
             }
         },
