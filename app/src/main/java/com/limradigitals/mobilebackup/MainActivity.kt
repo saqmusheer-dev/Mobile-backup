@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -242,8 +243,10 @@ private fun GalleryScreen(
                     GalleryTile(
                         item,
                         state.selectedKeys.contains(item.selectionKey),
-                        state.backedUpKeys.contains(item.selectionKey)
-                    ) { vm.toggleFile(item) }
+                        state.backedUpKeys.contains(item.selectionKey),
+                        onSelect = { vm.toggleFile(item) },
+                        onOpen = { openImage(context, item.uri, item.mimeType) }
+                    )
                 }
             }
         }
@@ -255,7 +258,8 @@ private fun GalleryTile(
     item: MediaItem,
     selected: Boolean,
     backedUp: Boolean,
-    onClick: () -> Unit
+    onSelect: () -> Unit,
+    onOpen: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val bitmap by produceState<Bitmap?>(initialValue = null, key1 = item.uri) {
@@ -269,7 +273,7 @@ private fun GalleryTile(
     }
 
     Card(
-        onClick = onClick,
+        onClick = onOpen,
         modifier = Modifier.fillMaxWidth().aspectRatio(1f),
         shape = RoundedCornerShape(10.dp)
     ) {
@@ -289,12 +293,12 @@ private fun GalleryTile(
 
             if (selected) {
                 Surface(
-                    modifier = Modifier.padding(6.dp).align(Alignment.TopEnd).size(28.dp),
+                    modifier = Modifier.padding(6.dp).align(Alignment.TopEnd).size(32.dp).clickable(onClick = onSelect),
                     shape = RoundedCornerShape(50),
                     color = MaterialTheme.colorScheme.primary
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("✓", color = Color.White)
+                        Text(if (selected) "✓" else "+", color = Color.White)
                     }
                 }
             }
@@ -441,13 +445,20 @@ private fun BackupScreenContent(
 @Composable
 private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
     var filter by remember { mutableStateOf("All") }
+    var sort by remember { mutableStateOf("Newest") }
 
-    val filtered = remember(state.scannedItems, filter) {
+    val filtered = remember(state.scannedItems, filter, sort) {
         when (filter) {
             "Phone" -> state.scannedItems.filter { it.category.startsWith("Phone/") }
             "WhatsApp" -> state.scannedItems.filter { it.category.startsWith("WhatsApp/") }
             "Downloads" -> state.scannedItems.filter { it.category == "Downloads" }
             else -> state.scannedItems
+        }.let { list ->
+            when (sort) {
+                "Oldest" -> list.sortedBy { it.modifiedSeconds }
+                "Name" -> list.sortedBy { it.name.lowercase(Locale.getDefault()) }
+                else -> list.sortedByDescending { it.modifiedSeconds }
+            }
         }
     }
 
@@ -494,6 +505,19 @@ private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
                 style = MaterialTheme.typography.bodySmall
             )
 
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf("Newest", "Oldest", "Name").forEach { option ->
+                    FilterChip(
+                        selected = sort == option,
+                        onClick = { sort = option },
+                        label = { Text(option) }
+                    )
+                }
+            }
+
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -519,7 +543,7 @@ private fun FileSelectionCard(state: BackupUiState, vm: BackupViewModel) {
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                item.category + " • " + formatBytes(item.size),
+                                item.category + " • " + formatBytes(item.size) + " • " + formatDate(item.modifiedSeconds),
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
@@ -855,6 +879,22 @@ private fun SettingRow(label: String, checked: Boolean, onChange: (Boolean) -> U
         Text(label)
         Switch(checked = checked, onCheckedChange = onChange)
     }
+}
+
+private fun openImage(context: android.content.Context, uri: Uri, mimeType: String) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType.ifBlank { "image/*" })
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        })
+    } catch (_: Exception) {
+    }
+}
+
+private fun formatDate(seconds: Long): String {
+    if (seconds <= 0) return "Unknown date"
+    return SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault())
+        .format(Date(seconds * 1000L))
 }
 
 private fun formatBytes(bytes: Long): String {

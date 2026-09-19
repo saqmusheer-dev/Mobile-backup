@@ -3,6 +3,8 @@ package com.limradigitals.mobilebackup
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -27,6 +29,13 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
     override suspend fun doWork(): Result {
         setForeground(createForegroundInfo("Preparing backup…", 0, 0))
 
+        val prefs = BackupPrefs(applicationContext)
+        if (prefs.wifiOnly && !isWifiConnected()) {
+            val message = "Waiting for Wi-Fi connection..."
+            saveStatus(message)
+            return Result.retry()
+        }
+
         val account = GoogleSignIn.getLastSignedInAccount(applicationContext)
         if (account == null || !GoogleSignIn.hasPermissions(account, Scope(DriveScopes.DRIVE_FILE))) {
             val message = "Connect Google Drive before starting backup."
@@ -34,7 +43,6 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
             return Result.failure(workDataOf("message" to message))
         }
 
-        val prefs = BackupPrefs(applicationContext)
         val allItems = MediaScanner(applicationContext).scan(
             phoneImages = prefs.phoneImages,
             phoneVideos = prefs.phoneVideos,
@@ -57,6 +65,11 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
         }
 
         val drive = DriveBackup(applicationContext)
+        val knownBackedUpKeys = try {
+            drive.findBackedUpKeys().toMutableSet()
+        } catch (_: Exception) {
+            null
+        }
         var uploaded = 0
         var alreadyBackedUp = 0
         var failed = 0
@@ -95,8 +108,11 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
             )
 
             try {
-                when (drive.upload(item)) {
-                    UploadResult.UPLOADED -> uploaded++
+                when (drive.upload(item, knownBackedUpKeys)) {
+                    UploadResult.UPLOADED -> {
+                        uploaded++
+                        knownBackedUpKeys?.add(drive.backupKey(item))
+                    }
                     UploadResult.ALREADY_BACKED_UP -> alreadyBackedUp++
                 }
                 completed++
@@ -189,6 +205,13 @@ class BackupWorker(appContext: Context, params: WorkerParameters) :
             notification,
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         )
+    }
+
+    private fun isWifiConnected(): Boolean {
+        val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
     private fun saveStatus(message: String) {

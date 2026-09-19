@@ -31,6 +31,7 @@ class DriveBackup(private val context: Context) {
 
     private val transport by lazy { GoogleNetHttpTransport.newTrustedTransport() }
     private val json = GsonFactory.getDefaultInstance()
+    private val folderCache = mutableMapOf<String, String>()
 
     fun account(): GoogleSignInAccount? = GoogleSignIn.getLastSignedInAccount(context)
 
@@ -57,6 +58,7 @@ class DriveBackup(private val context: Context) {
         s.replace("\\", "\\\\").replace("'", "\\'")
 
     private fun folder(d: Drive, name: String, parent: String): String {
+        folderCache["$parent/$name"]?.let { return it }
         val q = "'" + parent + "' in parents and name = '" + esc(name) +
             "' and mimeType = '" + FOLDER + "' and trashed = false"
 
@@ -68,13 +70,13 @@ class DriveBackup(private val context: Context) {
             .execute()
             .files
 
-        if (!found.isNullOrEmpty()) return found[0].id
+        if (!found.isNullOrEmpty()) return found[0].id.also { folderCache["$parent/$name"] = it }
 
         return d.files().create(File().apply {
             this.name = name
             mimeType = FOLDER
             parents = listOf(parent)
-        }).setFields("id").execute().id
+        }).setFields("id").execute().id.also { folderCache["$parent/$name"] = it }
     }
 
     private fun categoryFolder(d: Drive, category: String, root: String): String {
@@ -129,11 +131,12 @@ class DriveBackup(private val context: Context) {
             .isNullOrEmpty()
     }
 
-    fun upload(item: MediaItem): UploadResult {
+    fun upload(item: MediaItem, knownBackedUpKeys: Set<String>? = null): UploadResult {
         val d = drive()
         val key = sourceKey(item)
 
-        if (exists(d, key)) return UploadResult.ALREADY_BACKED_UP
+        if (knownBackedUpKeys?.contains(key) == true) return UploadResult.ALREADY_BACKED_UP
+        if (knownBackedUpKeys == null && exists(d, key)) return UploadResult.ALREADY_BACKED_UP
 
         val root = folder(d, ROOT, "root")
         val parent = categoryFolder(d, item.category, root)
@@ -150,8 +153,10 @@ class DriveBackup(private val context: Context) {
             }
 
             val create = d.files().create(metadata, media).setFields("id,name,size")
-            create.mediaHttpUploader.isDirectUploadEnabled = false
-            create.mediaHttpUploader.chunkSize = 4 * 1024 * 1024
+            create.mediaHttpUploader.isDirectUploadEnabled = item.size <= 5L * 1024L * 1024L
+            if (!create.mediaHttpUploader.isDirectUploadEnabled) {
+                create.mediaHttpUploader.chunkSize = 8 * 1024 * 1024
+            }
 
             val result = create.execute()
             if (result.id == null || result.size?.toLong() != item.size) {
