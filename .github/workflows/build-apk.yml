@@ -2,8 +2,6 @@ name: Build Android App
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ "main" ]
 
 jobs:
   build:
@@ -26,19 +24,7 @@ jobs:
         with:
           gradle-version: "8.10"
 
-      - name: Build debug APK
-        if: github.event_name != 'workflow_dispatch'
-        run: gradle assembleDebug --no-daemon
-
-      - name: Upload debug APK
-        if: github.event_name != 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: mobile-backup-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-
       - name: Check release signing secrets
-        if: github.event_name == 'workflow_dispatch'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -51,7 +37,6 @@ jobs:
           test -n "$ANDROID_KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
 
       - name: Build signed release APK and AAB
-        if: github.event_name == 'workflow_dispatch'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -61,14 +46,12 @@ jobs:
           gradle assembleRelease bundleRelease --no-daemon
 
       - name: Upload release APK
-        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: mobile-backup-v1.0.0-release-apk
           path: app/build/outputs/apk/release/app-release.apk
 
       - name: Upload release AAB
-        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: mobile-backup-v1.0.0-release-aab
