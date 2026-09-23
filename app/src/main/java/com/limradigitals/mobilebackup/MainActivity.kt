@@ -55,13 +55,13 @@ class MainActivity : ComponentActivity() {
 
     private var pendingMoveFolder: String? = null
 
-    private val deleteWriteLauncher = registerForActivityResult(
+    private val trashWriteLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
-            vm.finishDeleteSelectedFiles()
+            vm.finishTrashSelectedFiles()
         } else {
-            vm.setMessage("Delete cancelled. No files were deleted.")
+            vm.setMessage("Move to Trash cancelled. No files were changed.")
         }
     }
 
@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
                     labelSmall = Typography().labelSmall.copy(fontSize = 13.sp)
                 )
             ) {
-                BackupApp(vm, driveLauncher, ::shareZip, ::requestMove, ::requestDelete)
+                BackupApp(vm, driveLauncher, ::shareZip, ::requestMove, ::requestTrash)
             }
         }
     }
@@ -152,23 +152,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun requestDelete() {
+    private fun requestTrash() {
         val uris = vm.selectedUris()
         if (uris.isEmpty()) {
-            vm.setMessage("Select files before deleting.")
+            vm.setMessage("Select files before moving them to Trash.")
             return
         }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
-                val request = MediaStore.createDeleteRequest(contentResolver, uris)
-                deleteWriteLauncher.launch(
+                val request = MediaStore.createTrashRequest(
+                    contentResolver,
+                    uris,
+                    true
+                )
+                trashWriteLauncher.launch(
                     IntentSenderRequest.Builder(request.intentSender).build()
                 )
             } catch (_: Exception) {
-                vm.setMessage("Android could not request delete permission for these files.")
+                vm.setMessage("Android could not open Trash for these files.")
             }
         } else {
-            vm.deleteSelectedFiles()
+            // Android 10 fallback: use our visible local Trash folder.
+            vm.moveSelectedToFolder("Trash")
         }
     }
 
@@ -206,7 +212,7 @@ private fun BackupApp(
     driveLauncher: ActivityResultLauncher<Intent>,
     shareZip: (Uri) -> Unit,
     requestMove: (String) -> Unit,
-    requestDelete: () -> Unit
+    requestTrash: () -> Unit
 ) {
     val state by vm.state.collectAsState()
     var screen by remember { mutableStateOf("Backup") }
@@ -250,7 +256,7 @@ private fun BackupApp(
             "Organize" -> OrganizeScreen(state, vm, requestMove, { folder -> galleryFolderRequest = folder; screen = "Gallery" }, Modifier.padding(pad))
             "Accounts" -> AccountsScreen(state, vm, driveLauncher, Modifier.padding(pad))
             "Settings" -> SettingsScreen(state, vm, Modifier.padding(pad))
-            else -> BackupScreenContent(state, vm, shareZip, requestDelete, Modifier.padding(pad))
+            else -> BackupScreenContent(state, vm, shareZip, requestTrash, Modifier.padding(pad))
         }
     }
 
@@ -677,11 +683,11 @@ private fun BackupScreenContent(
     state: BackupUiState,
     vm: BackupViewModel,
     shareZip: (Uri) -> Unit,
-    requestDelete: () -> Unit,
+    requestTrash: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showDrivePicker by remember { mutableStateOf(false) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showTrashConfirm by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -722,10 +728,10 @@ private fun BackupScreenContent(
             item { FileSelectionCard(state, vm) }
             item {
                 OutlinedButton(
-                    onClick = { showDeleteConfirm = true },
+                    onClick = { showTrashConfirm = true },
                     enabled = state.selectedKeys.isNotEmpty() && !state.backupRunning,
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("Delete Selected Files") }
+                ) { Text("Move Selected to Trash") }
             }
         }
 
@@ -829,25 +835,26 @@ private fun BackupScreenContent(
         DriveFolderPickerDialog(state, vm) { showDrivePicker = false }
     }
 
-    if (showDeleteConfirm) {
+    if (showTrashConfirm) {
         AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete selected files?") },
+            onDismissRequest = { showTrashConfirm = false },
+            title = { Text("Move selected files to Trash?") },
             text = {
                 Text(
-                    "This will permanently delete " +
+                    "The selected " +
                         state.selectedKeys.size +
-                        " selected file" +
-                        if (state.selectedKeys.size == 1) "." else "s."
+                        " file" +
+                        if (state.selectedKeys.size == 1) " will" else "s will" +
+                        " be moved to Trash instead of being permanently deleted."
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         showDeleteConfirm = false
-                        requestDelete()
+                        requestTrash()
                     }
-                ) { Text("Delete") }
+                ) { Text("Move to Trash") }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
