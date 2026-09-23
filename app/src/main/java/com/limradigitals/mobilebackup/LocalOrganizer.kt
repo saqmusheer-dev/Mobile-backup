@@ -50,11 +50,15 @@ object LocalOrganizer {
                 val values = ContentValues().apply {
                     put(
                         MediaStore.MediaColumns.RELATIVE_PATH,
-                        "Download/Mobile Backup/$cleanFolder"
+                        "Download/Mobile Backup/$cleanFolder/"
                     )
                 }
                 val updated = context.contentResolver.update(item.uri, values, null, null)
-                if (updated > 0) moved++ else failed++
+                if (updated > 0) {
+                    moved++
+                } else {
+                    failed++
+                }
             } catch (_: SecurityException) {
                 failed++
             } catch (_: Exception) {
