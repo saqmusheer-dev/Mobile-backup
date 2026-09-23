@@ -399,25 +399,29 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
             .filter { _state.value.selectedKeys.contains(it.selectionKey) }
             .map { it.uri }
 
-    fun finishDeleteSelectedFiles() {
+    fun finishTrashSelectedFiles() {
         val selected = _state.value.selectedKeys
         if (selected.isEmpty()) {
-            setMessage("Select files before deleting.")
+            setMessage("Select files before moving them to Trash.")
             return
         }
 
-        val remaining = _state.value.scannedItems.filterNot {
+        val remainingScanned = _state.value.scannedItems.filterNot {
+            selected.contains(it.selectionKey)
+        }
+        val remainingLocal = _state.value.localStorageItems.filterNot {
             selected.contains(it.selectionKey)
         }
 
         _state.value = _state.value.copy(
-            scannedItems = remaining,
+            scannedItems = remainingScanned,
+            localStorageItems = remainingLocal,
             selectedKeys = emptySet(),
             selectedBytes = 0L,
             pending = 0,
-            filesFound = remaining.size,
+            filesFound = remainingScanned.size,
             message = selected.size.toString() +
-                " file" + if (selected.size == 1) " deleted." else "s deleted."
+                " file" + if (selected.size == 1) " moved to Trash." else "s moved to Trash."
         )
         selectionStore.saveSelected(emptySet())
     }
