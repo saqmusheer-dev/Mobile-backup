@@ -851,13 +851,13 @@ private fun BackupScreenContent(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showDeleteConfirm = false
+                        showTrashConfirm = false
                         requestTrash()
                     }
                 ) { Text("Move to Trash") }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showTrashConfirm = false }) { Text("Cancel") }
             }
         )
     }
