@@ -395,7 +395,7 @@ class BackupViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectedUris(): List<Uri> =
-        _state.value.scannedItems
+        selectableItems()
             .filter { _state.value.selectedKeys.contains(it.selectionKey) }
             .map { it.uri }
 
